@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-from bot import auth_ccxt, scheduler
+from bot import auth_coinbase, scheduler
 import json
 
 if __name__ == '__main__':
     
     print('start DCA bot')
     print('Connecting to Coinbase API')
-    coinbase = auth_ccxt.ConnectCoinbase()
+    coinbase = auth_coinbase.ConnectCoinbase()
 
     print('Setting Schedules')
     task_schedule = scheduler.scheduleSetup('schedule.json')

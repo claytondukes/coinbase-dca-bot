@@ -1,3 +1,6 @@
+schedule.json
+test_json.json
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
@@ -134,5 +137,3 @@ example_*.json
 *.pkl
 test_script.py
 
-schedule.json
-test_json.json
