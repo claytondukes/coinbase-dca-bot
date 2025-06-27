@@ -3,6 +3,7 @@ from dotenv import load_dotenv
 import os
 from datetime import datetime
 import uuid
+import time
 
 class ConnectCoinbase():
     """
@@ -82,13 +83,17 @@ class ConnectCoinbase():
             print(f"Failed to get market information: {e}")
             return None
 
-    def create_order(self, currency_pair=None, amount_quote_currency=None):
+    def create_order(self, currency_pair=None, amount_quote_currency=None, order_type='limit', limit_price_pct=0.999, max_retries=3):
         """
-        Create a market order to buy cryptocurrency using quote currency amount.
+        Create a buy order for cryptocurrency using quote currency amount.
         
         Args:
             currency_pair (str): Currency pair in format 'BTC/USDC'
             amount_quote_currency (float): Amount of quote currency to spend
+            order_type (str): Order type to create ('market' or 'limit')
+            limit_price_pct (float): For limit orders, percentage of current price to set as limit
+                                    (e.g., 0.999 means 99.9% of market price, making you a maker)
+            max_retries (int): Maximum number of retries for limit order price checks
             
         Returns:
             dict: Order information if successful, None otherwise
@@ -99,7 +104,7 @@ class ConnectCoinbase():
         
         self.current_datetime = datetime.utcnow()
         print(f"Current UTC time is: {self.current_datetime}")
-        print('Creating market order')
+        print(f'Creating {order_type} order')
         print(f'Currency pair: {currency_pair}')
         print(f'Amount of quote currency: {amount_quote_currency}')
         
@@ -111,12 +116,81 @@ class ConnectCoinbase():
         print(f'Generated client_order_id: {client_order_id}')
         
         try:
-            # Use market order with quote size (amount of quote currency to spend)
-            order = self.client.market_order_buy(
-                client_order_id=client_order_id,
-                product_id=product_id,
-                quote_size=str(amount_quote_currency)
-            )
+            if order_type.lower() == 'market':
+                # Use market order with quote size (amount of quote currency to spend)
+                order = self.client.market_order_buy(
+                    client_order_id=client_order_id,
+                    product_id=product_id,
+                    quote_size=str(amount_quote_currency)
+                )
+            else:  # limit order
+                # Get current market price for the product
+                market_info = self.get_markets(currency_pair)
+                if not market_info:
+                    print(f"Could not get market price for {currency_pair}")
+                    return None
+                
+                # Calculate limit price (slightly below market to ensure maker status)
+                market_price = float(market_info['price'])
+                limit_price = market_price * limit_price_pct
+                print(f"Market price: {market_price}, Limit price: {limit_price}")
+                
+                # Calculate base currency amount (how much crypto we're buying)
+                base_size = amount_quote_currency / limit_price
+                # Format to appropriate decimal places based on typical crypto requirements
+                # Most exchanges require BTC to 8 decimal places, ETH to 6, etc.
+                # This is a simple approach - ideally we'd get product details to determine precision
+                if currency_pair.startswith('BTC'):
+                    base_size = round(base_size, 8)
+                elif currency_pair.startswith('ETH'):
+                    base_size = round(base_size, 6)
+                else:
+                    base_size = round(base_size, 6)  # Default precision
+                
+                print(f"Buying {base_size} {currency_pair.split('/')[0]} at {limit_price}")
+                
+                # Place limit order
+                order = self.client.limit_order_buy(
+                    client_order_id=client_order_id,
+                    product_id=product_id,
+                    base_size=str(base_size),
+                    limit_price=str(limit_price)
+                )
+                
+                # For limit orders, we can optionally monitor the status
+                # This is commented out by default as it might block the scheduler
+                # Uncomment if you want to wait for the order to fill
+                """
+                # Check if the order was placed successfully before monitoring
+                if hasattr(order, 'success') and order.success and hasattr(order, 'success_response'):
+                    order_id = order.success_response.get('order_id')
+                    if order_id:
+                        # Monitor order status with retries
+                        retries = 0
+                        while retries < max_retries:
+                            try:
+                                order_status = self.client.get_order(order_id)
+                                status = order_status.get('status', '')
+                                print(f"Order status: {status}")
+                                if status == 'FILLED':
+                                    print("Limit order filled successfully")
+                                    break
+                                elif status in ['FAILED', 'CANCELLED', 'EXPIRED']:
+                                    print(f"Order failed with status: {status}")
+                                    break
+                                else:
+                                    # Wait before checking again
+                                    retries += 1
+                                    print(f"Waiting for order to fill... (retry {retries}/{max_retries})")
+                                    time.sleep(5)  # Wait 5 seconds between checks
+                            except Exception as e:
+                                print(f"Error checking order status: {e}")
+                                retries += 1
+                                time.sleep(5)
+                        
+                        if retries >= max_retries:
+                            print("Reached maximum retries, order may still be open")
+                """
             
             # Handle CreateOrderResponse object attributes
             if hasattr(order, 'success') and order.success:

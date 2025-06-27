@@ -14,7 +14,16 @@ if __name__ == '__main__':
     for task in task_schedule.schedule_data:
         currency_pair = task['currency_pair']
         quote_currency_amount = task['quote_currency_amount']
-        task_schedule.create_schedule(task, lambda cp=currency_pair, qca=quote_currency_amount: coinbase.create_order(cp, qca))
+        # Get order_type from task or use 'limit' as default
+        order_type = task.get('order_type', 'limit')
+        # Get limit_price_pct from task or use 0.999 (99.9%) as default
+        limit_price_pct = task.get('limit_price_pct', 0.999)
+        
+        task_schedule.create_schedule(
+            task, 
+            lambda cp=currency_pair, qca=quote_currency_amount, ot=order_type, lpp=limit_price_pct: 
+                coinbase.create_order(cp, qca, order_type=ot, limit_price_pct=lpp)
+        )
         #task_schedule.create_schedule(task, lambda cp=currency_pair: coinbase.get_markets(cp))
 
     task_schedule.show_schedule()

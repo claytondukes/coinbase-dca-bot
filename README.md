@@ -9,6 +9,7 @@ Frequently used for DCA (Dollar-Cost Averaging) investment strategies to reduce 
 - Schedule cryptocurrency purchases on a daily or weekly basis
 - Configure purchases for multiple currency pairs
 - Specify the exact time and day for transactions
+- Support for both limit (maker) and market (taker) orders
 - Lower fees compared to standard Coinbase purchases
 - Flexible deployment options (local Python or Docker)
 
@@ -66,7 +67,7 @@ This guide assumes you have some knowledge of setting up a Python environment an
 
 The time set is in 24 hour format and is based on the local time of the machine running the script.
 
-**NOTE:** Currently, you can only schedule market order BUY side transactions e.g. `BTC/GBP` means you are buying `BTC` with the `quote_currency_amount` of `GBP`.
+You can specify whether to use limit orders (maker) or market orders (taker) for each transaction. Limit orders help reduce fees and eliminate price slippage. By default, the bot uses limit orders with a price set slightly below market price (99.9%) to ensure you act as a maker. e.g. `BTC/GBP` means you are buying `BTC` with the `quote_currency_amount` of `GBP`.
 
 ```json
 [
@@ -75,14 +76,17 @@ The time set is in 24 hour format and is based on the local time of the machine 
         "day_of_week": null,
         "time": "10:30",
         "currency_pair": "ETH/GBP",
-        "quote_currency_amount": 1
+        "quote_currency_amount": 1,
+        "order_type": "limit",
+        "limit_price_pct": 0.999
     },
     {
         "frequency": "weekly",
         "day_of_week": "wednesday",
         "time": "15:45",
         "currency_pair": "BTC/GBP",
-        "quote_currency_amount": 1
+        "quote_currency_amount": 1,
+        "order_type": "market"
     }
 ]
 ```
@@ -119,3 +123,5 @@ This will run the bot in the background with automatic restarts and log output t
 - Originally started working on Binance and connecting to their APIs, but due to some personal consumer issues, focus shifted to Coinbase Advanced Trader.
 - The bot will run indefinitely, executing trades based on your schedule configuration.
 - All transactions are logged for reference and troubleshooting.
+- For limit orders, the price is set at a percentage (`limit_price_pct`) of the current market price (default: 99.9%) to ensure your orders execute as maker orders with lower fees.
+- If `order_type` is not specified, limit orders are used by default. Set `order_type` to `"market"` if you want to use market orders instead.
