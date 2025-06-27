@@ -157,15 +157,15 @@ class ConnectCoinbase():
                 # Calculate end_time for limit orders (RFC3339 format)
                 end_time = (datetime.utcnow() + timedelta(hours=order_timeout_hours)).strftime('%Y-%m-%dT%H:%M:%SZ')
                 print(f"Order will expire at: {end_time}")
-        
-                # Place limit order
-                order = self.client.limit_order_gtc(
+                
+                # Place limit order using GTD (Good-Till-Date) with expiration time
+                order = self.client.limit_order_gtd(
                     client_order_id=client_order_id,
                     product_id=product_id,
                     base_size=str(base_size),
                     limit_price=str(limit_price),
-                    side="BUY",  # Required parameter for limit_order_gtc
-                    end_time=end_time  # Auto-cancel order if not filled by this time
+                    side="BUY",  # Required parameter for limit_order_gtd
+                    end_time=end_time  # When the order should expire if not filled
                 )
                 
                 # For limit orders, we can optionally monitor the status
