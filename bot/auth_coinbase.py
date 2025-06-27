@@ -1,7 +1,7 @@
 from coinbase.rest import RESTClient
 from dotenv import load_dotenv
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 import uuid
 import time
 
@@ -88,7 +88,7 @@ class ConnectCoinbase():
             print(f"Failed to get market information: {e}")
             return None
 
-    def create_order(self, currency_pair=None, amount_quote_currency=None, order_type='limit', limit_price_pct=0.999, max_retries=3):
+    def create_order(self, currency_pair=None, amount_quote_currency=None, order_type='limit', limit_price_pct=0.999, order_timeout_hours=24, max_retries=3):
         """
         Create a buy order for cryptocurrency using quote currency amount.
         
@@ -154,12 +154,18 @@ class ConnectCoinbase():
                 
                 print(f"Buying {base_size} {currency_pair.split('/')[0]} at {limit_price}")
                 
+                # Calculate end_time for limit orders (RFC3339 format)
+                end_time = (datetime.utcnow() + timedelta(hours=order_timeout_hours)).strftime('%Y-%m-%dT%H:%M:%SZ')
+                print(f"Order will expire at: {end_time}")
+        
                 # Place limit order
-                order = self.client.limit_order_buy(
+                order = self.client.limit_order_gtc(
                     client_order_id=client_order_id,
                     product_id=product_id,
                     base_size=str(base_size),
-                    limit_price=str(limit_price)
+                    limit_price=str(limit_price),
+                    side="BUY",  # Required parameter for limit_order_gtc
+                    end_time=end_time  # Auto-cancel order if not filled by this time
                 )
                 
                 # For limit orders, we can optionally monitor the status

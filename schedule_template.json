@@ -6,7 +6,10 @@
         "time": "10:30",
         "buy_or_sell": "buy",
         "currency_pair": "ETH/GBP",
-        "quote_currency_amount": 1
+        "quote_currency_amount": 1,
+        "order_type": "limit",
+        "limit_price_pct": 0.999,
+        "order_timeout_hours": 24
     },
     {
         "frequency": "weekly",
@@ -15,7 +18,8 @@
         "time": "12:45",
         "buy_or_sell": "buy",
         "currency_pair": "BTC/GBP",
-        "quote_currency_amount": 1
+        "quote_currency_amount": 1,
+        "order_type": "market"
     },
     {
         "frequency": "monthly",
@@ -24,7 +28,10 @@
         "time": "18:45",
         "buy_or_sell": "buy",
         "currency_pair": "ETH/GBP",
-        "quote_currency_amount": 1
+        "quote_currency_amount": 1,
+        "order_type": "limit",
+        "limit_price_pct": 0.995,
+        "order_timeout_hours": 48
     },
     {
         "frequency": "hourly",
