@@ -1,53 +1,50 @@
 [
     {
-        "frequency": "daily",
-        "day_of_week": null,
+        "frequency": "weekly",
+        "day_of_week": "saturday",
         "day_of_month": null,
-        "time": "10:30",
+        "time": "15:45",
         "buy_or_sell": "buy",
-        "currency_pair": "ETH/GBP",
-        "quote_currency_amount": 1,
+        "currency_pair": "BTC/USDC",
+        "quote_currency_amount": 250,
         "order_type": "limit",
-        "limit_price_pct": 0.999,
-        "order_timeout_seconds": 600
+        "limit_price_pct": 0.01,
+        "order_timeout_seconds": 43200
     },
     {
         "frequency": "weekly",
-        "day_of_week": "wednesday",
+        "day_of_week": "saturday",
         "day_of_month": null,
-        "time": "12:45",
+        "time": "15:45",
         "buy_or_sell": "buy",
-        "currency_pair": "BTC/GBP",
-        "quote_currency_amount": 1,
-        "order_type": "market"
-    },
-    {
-        "frequency": "monthly",
-        "day_of_week": null,
-        "day_of_month": "15",
-        "time": "18:45",
-        "buy_or_sell": "buy",
-        "currency_pair": "ETH/GBP",
-        "quote_currency_amount": 1,
+        "currency_pair": "XRP/USDC",
+        "quote_currency_amount": 5.00,
         "order_type": "limit",
-        "limit_price_pct": 0.995,
-        "order_timeout_hours": 48
+        "limit_price_pct": 0.01,
+        "order_timeout_seconds": 43200
     },
     {
-        "frequency": "hourly",
-        "day_of_week": null,
+        "frequency": "weekly",
+        "day_of_week": "saturday",
         "day_of_month": null,
-        "time": "09:45",
+        "time": "15:45",
         "buy_or_sell": "buy",
-        "currency_pair": "ETH/GBP",
-        "quote_currency_amount": 1
+        "currency_pair": "ETH/USDC",
+        "quote_currency_amount": 10.00,
+        "order_type": "limit",
+        "limit_price_pct": 0.01,
+        "order_timeout_seconds": 43200
     },
     {
-        "frequency": "seconds",
-        "seconds": 120,
-        "time": "08:20",
+        "frequency": "weekly",
+        "day_of_week": "saturday",
+        "day_of_month": null,
+        "time": "15:45",
         "buy_or_sell": "buy",
-        "currency_pair": "ETH/GBP",
-        "quote_currency_amount": 1
+        "currency_pair": "ADA/USDC",
+        "quote_currency_amount": 4.00,
+        "order_type": "limit",
+        "limit_price_pct": 0.01,
+        "order_timeout_seconds": 43200
     }
 ]
