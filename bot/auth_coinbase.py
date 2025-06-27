@@ -135,16 +135,29 @@ class ConnectCoinbase():
                     print(f"Could not get market price for {currency_pair}")
                     return None
                 
-                # Calculate limit price (slightly below market to ensure maker status)
+                # Calculate limit price with discount from market price
                 market_price = float(market_info['price'])
-                limit_price = market_price * limit_price_pct
+                
+                # Apply discount percentage to calculate limit price
+                # Default is 0.1% below market price to ensure maker status
+                limit_price = market_price * (1 - (limit_price_pct / 100))
+                
+                # Adjust precision based on trading pair
+                # Coinbase requires specific decimal precision for each pair
+                if currency_pair.startswith('BTC'):
+                    limit_price = round(limit_price, 2)  # BTC typically uses 2 decimal places for price
+                elif currency_pair.startswith('ETH'):
+                    limit_price = round(limit_price, 2)  # ETH typically uses 2 decimal places for price
+                else:
+                    limit_price = round(limit_price, 2)  # Default to 2 decimal places for other pairs
+                
                 print(f"Market price: {market_price}, Limit price: {limit_price}")
+                print(f"Using {limit_price_pct}% discount for limit order")
                 
                 # Calculate base currency amount (how much crypto we're buying)
                 base_size = amount_quote_currency / limit_price
                 # Format to appropriate decimal places based on typical crypto requirements
                 # Most exchanges require BTC to 8 decimal places, ETH to 6, etc.
-                # This is a simple approach - ideally we'd get product details to determine precision
                 if currency_pair.startswith('BTC'):
                     base_size = round(base_size, 8)
                 elif currency_pair.startswith('ETH'):
