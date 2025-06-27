@@ -67,10 +67,15 @@ class ConnectCoinbase():
         try:
             product = self.client.get_product(product_id)
             if product:
+                # Access price as an attribute of the product object (not as a dictionary)
+                # The Coinbase API returns a GetProductResponse object, not a dictionary
+                price = getattr(product, 'price', '0')
+                print(f"Retrieved {product_id} price: {price}")
+                
                 market_info = {
                     'symbol': currency_pair,
                     'id': product_id,
-                    'price': product.get('price', '0'),
+                    'price': price,
                     'base': currency_pair.split('/')[0],
                     'quote': currency_pair.split('/')[1]
                 }
