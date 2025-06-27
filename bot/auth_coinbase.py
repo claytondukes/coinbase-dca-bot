@@ -88,7 +88,7 @@ class ConnectCoinbase():
             print(f"Failed to get market information: {e}")
             return None
 
-    def create_order(self, currency_pair=None, amount_quote_currency=None, order_type='limit', limit_price_pct=0.999, order_timeout_hours=24, max_retries=3):
+    def create_order(self, currency_pair, amount_quote_currency, client_order_id=None, order_type="limit", limit_price_pct=0.1, order_timeout_seconds=600, max_retries=3):
         """
         Create a buy order for cryptocurrency using quote currency amount.
         
@@ -168,8 +168,8 @@ class ConnectCoinbase():
                 print(f"Buying {base_size} {currency_pair.split('/')[0]} at {limit_price}")
                 
                 # Calculate end_time for limit orders (RFC3339 format)
-                end_time = (datetime.utcnow() + timedelta(hours=order_timeout_hours)).strftime('%Y-%m-%dT%H:%M:%SZ')
-                print(f"Order will expire at: {end_time}")
+                end_time = (datetime.utcnow() + timedelta(seconds=order_timeout_seconds)).strftime('%Y-%m-%dT%H:%M:%SZ')
+                print(f"Order will expire at: {end_time} ({order_timeout_seconds} seconds from now)")
                 
                 # Enable debug logging to see the actual payload sent
                 import logging

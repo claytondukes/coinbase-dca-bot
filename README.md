@@ -78,8 +78,8 @@ You can specify whether to use limit orders (maker) or market orders (taker) for
         "currency_pair": "ETH/GBP",
         "quote_currency_amount": 1,
         "order_type": "limit",
-        "limit_price_pct": 0.999,
-        "order_timeout_hours": 24
+        "limit_price_pct": 0.1,
+        "order_timeout_seconds": 600
     },
     {
         "frequency": "weekly",
@@ -125,5 +125,5 @@ This will run the bot in the background with automatic restarts and log output t
 - The bot will run indefinitely, executing trades based on your schedule configuration.
 - All transactions are logged for reference and troubleshooting.
 - For limit orders, the price is set at a percentage (`limit_price_pct`) of the current market price (default: 99.9%) to ensure your orders execute as maker orders with lower fees.
-- Limit orders can be configured with an auto-cancellation time using `order_timeout_hours` (default: 24). This sets an expiration time after which unfilled limit orders will automatically be cancelled, preventing stuck orders.
+- Limit orders can be configured with an auto-cancellation time using `order_timeout_seconds`. When using limit orders, this setting determines how long (in seconds) a limit order remains active before being auto-cancelled if not filled. Default is 600 seconds (10 minutes). This prevents stuck orders.
 - If `order_type` is not specified, limit orders are used by default. Set `order_type` to `"market"` if you want to use market orders instead.
