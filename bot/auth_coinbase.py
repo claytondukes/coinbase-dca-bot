@@ -158,15 +158,35 @@ class ConnectCoinbase():
                 end_time = (datetime.utcnow() + timedelta(hours=order_timeout_hours)).strftime('%Y-%m-%dT%H:%M:%SZ')
                 print(f"Order will expire at: {end_time}")
                 
-                # Place limit order using GTD (Good-Till-Date) with expiration time
-                order = self.client.limit_order_gtd(
-                    client_order_id=client_order_id,
-                    product_id=product_id,
-                    base_size=str(base_size),
-                    limit_price=str(limit_price),
-                    side="BUY",  # Required parameter for limit_order_gtd
-                    end_time=end_time  # When the order should expire if not filled
-                )
+                # Enable debug logging to see the actual payload sent
+                import logging
+                logging.basicConfig(level=logging.DEBUG)
+                
+                try:
+                    # Try placing a GTD limit order with expiration time
+                    # Using explicit parameter ordering to match SDK source code exactly
+                    order = self.client.limit_order_gtd(
+                        client_order_id,
+                        product_id,
+                        "BUY",
+                        str(base_size),
+                        str(limit_price),
+                        end_time,
+                        False  # post_only
+                    )
+                    print("GTD order placed successfully with expiration")
+                except Exception as e:
+                    print(f"GTD order failed: {e}")
+                    print("Falling back to GTC order without expiration")
+                    
+                    # Fall back to GTC limit order without expiration
+                    order = self.client.limit_order_gtc(
+                        client_order_id=client_order_id,
+                        product_id=product_id,
+                        base_size=str(base_size),
+                        limit_price=str(limit_price),
+                        side="BUY"  # Required parameter for limit_order_gtc
+                    )
                 
                 # For limit orders, we can optionally monitor the status
                 # This is commented out by default as it might block the scheduler
