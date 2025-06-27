@@ -16,7 +16,7 @@ if __name__ == '__main__':
         quote_currency_amount = task['quote_currency_amount']
         # Get order_type from task or use 'limit' as default
         order_type = task.get('order_type', 'limit')  # Default to limit orders
-        limit_price_pct = task.get('limit_price_pct', 0.1)  # Default to 0.1% below market price
+        limit_price_pct = task.get('limit_price_pct', 0.01)  # Default to 0.01% below market price
         order_timeout_seconds = task.get('order_timeout_seconds', 600)  # Default to 600 seconds (10 minutes)
         
         task_schedule.create_schedule(

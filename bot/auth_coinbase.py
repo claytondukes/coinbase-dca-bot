@@ -88,7 +88,7 @@ class ConnectCoinbase():
             print(f"Failed to get market information: {e}")
             return None
 
-    def create_order(self, currency_pair, amount_quote_currency, client_order_id=None, order_type="limit", limit_price_pct=0.1, order_timeout_seconds=600, max_retries=3):
+    def create_order(self, currency_pair, amount_quote_currency, client_order_id=None, order_type="limit", limit_price_pct=0.01, order_timeout_seconds=600, max_retries=3):
         """
         Create a buy order for cryptocurrency using quote currency amount.
         
@@ -139,7 +139,7 @@ class ConnectCoinbase():
                 market_price = float(market_info['price'])
                 
                 # Apply discount percentage to calculate limit price
-                # Default is 0.1% below market price to ensure maker status
+                # Default is 0.01% below market price to ensure maker status
                 limit_price = market_price * (1 - (limit_price_pct / 100))
                 
                 # Adjust precision based on trading pair
