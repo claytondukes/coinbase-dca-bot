@@ -2,7 +2,11 @@
 from bot import auth_coinbase, scheduler
 import logging
 import os
-from dotenv import load_dotenv
+try:
+    from dotenv import load_dotenv
+except Exception:
+    def load_dotenv(*args, **kwargs):
+        return None
 
 if __name__ == '__main__':
     # Load .env for local (non-Docker) runs
