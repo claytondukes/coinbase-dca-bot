@@ -1,5 +1,8 @@
 # Use the official Python image from Docker Hub
-FROM python:latest
+FROM python:3.11-slim
+
+# Install tzdata for timezone support
+RUN apt-get update && apt-get install -y tzdata && rm -rf /var/lib/apt/lists/*
 
 # Set the working directory in the container
 WORKDIR /usr/src/app

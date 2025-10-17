@@ -75,7 +75,7 @@ Basic familiarity with Python environments and script execution is assumed.
    keys than the previous version. Use the full
    `organizations/<org-id>/apiKeys/<key-id>` format as shown above.
 
-3. Create `schedule.json` from `schedule_template.json` and define the schedule.
+3. Create `schedule.json` from `schedule-sample.json` and define the schedule.
 
 Times are in 24‑hour format and interpreted in the process timezone.
 
