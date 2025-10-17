@@ -1,8 +1,16 @@
 #!/usr/bin/env python3
 from bot import auth_coinbase, scheduler
-import json
+import logging
+import os
 
 if __name__ == '__main__':
+    # Configure logging at process startup if verbose mode is enabled
+    verbose_env = os.getenv('COINBASE_VERBOSE', '').strip().lower()
+    if verbose_env in ('1', 'true', 'yes', 'on', 'debug'):
+        logging.basicConfig(
+            level=logging.DEBUG,
+            format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+        )
     
     print('start DCA bot')
     print('Connecting to Coinbase API')

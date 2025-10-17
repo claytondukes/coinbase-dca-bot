@@ -248,10 +248,7 @@ class ConnectCoinbase():
                 end_time = (datetime.utcnow() + timedelta(seconds=order_timeout_seconds)).strftime('%Y-%m-%dT%H:%M:%SZ')
                 print(f"Order will expire at: {end_time} ({order_timeout_seconds} seconds from now)")
                 
-                # Enable debug logging to see the actual payload sent
-                if getattr(self, 'verbose', False):
-                    import logging
-                    logging.basicConfig(level=logging.DEBUG)
+                # Debug logging is configured at process startup if verbose=True
                 
                 try:
                     # Try placing a GTD limit order with expiration time
@@ -317,7 +314,7 @@ class ConnectCoinbase():
             
             # Handle CreateOrderResponse object attributes
             if hasattr(order, 'success') and order.success:
-                print("Order completed successfully")
+                print("Order placed successfully")
                 
                 # Extract order details from success_response dictionary
                 if hasattr(order, 'success_response'):

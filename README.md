@@ -187,7 +187,6 @@ Example schedule entry (maker-first):
 {
   "frequency": "daily",
   "time": "15:45",
-  "buy_or_sell": "buy",
   "currency_pair": "BTC/USDC",
   "quote_currency_amount": 20,
   "order_type": "limit",
