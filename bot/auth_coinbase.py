@@ -7,6 +7,26 @@ import time
 from decimal import Decimal, ROUND_DOWN
 import threading
 
+def quantize_or_round(value, increment, default_decimals):
+    """
+    Helper to quantize a value by increment or fall back to rounding.
+    
+    Args:
+        value: Numeric value to quantize (float, int, or Decimal)
+        increment: Increment to quantize by (string or None)
+        default_decimals: Number of decimals to round to if increment fails
+    
+    Returns:
+        Decimal: Quantized value
+    """
+    if increment:
+        try:
+            return Decimal(str(value)).quantize(Decimal(str(increment)), rounding=ROUND_DOWN)
+        except Exception:
+            return Decimal(str(round(float(value), default_decimals)))
+    else:
+        return Decimal(str(round(float(value), default_decimals)))
+
 class ConnectCoinbase():
     """
     Class for connecting to Coinbase Advanced Trade API using the official SDK.
@@ -78,8 +98,8 @@ class ConnectCoinbase():
             print(f"Failed to get balance: {e}")
             return None
 
-    def get_markets(self, currency_pair=None):
-        """Get market information for a specific currency pair."""
+    def get_product_info(self, currency_pair=None):
+        """Get full product information including price and increments."""
         if currency_pair is None:
             print('No currency pair provided, using default')
             currency_pair = 'BTC/USDC'
@@ -90,8 +110,7 @@ class ConnectCoinbase():
         try:
             product = self.client.get_product(product_id)
             if product:
-                # Access price as an attribute of the product object (not as a dictionary)
-                # The Coinbase API returns a GetProductResponse object, not a dictionary
+                # Access price as an attribute of the product object
                 price = getattr(product, 'price', None)
                 # Validate price
                 try:
@@ -104,20 +123,25 @@ class ConnectCoinbase():
                     return None
                 print(f"Retrieved {product_id} price: {price_float}")
                 
-                market_info = {
+                # Return full product info including increments
+                product_info = {
                     'symbol': currency_pair,
                     'id': product_id,
                     'price': price_float,
                     'base': currency_pair.split('/')[0],
-                    'quote': currency_pair.split('/')[1]
+                    'quote': currency_pair.split('/')[1],
+                    'price_increment': getattr(product, 'price_increment', None),
+                    'base_increment': getattr(product, 'base_increment', None),
+                    'quote_increment': getattr(product, 'quote_increment', None),
+                    'quote_min_size': getattr(product, 'quote_min_size', None),
+                    'base_min_size': getattr(product, 'base_min_size', None)
                 }
-                print(market_info)
-                return market_info
+                return product_info
             else:
-                print(f"Could not retrieve market information for {currency_pair}")
+                print(f"Could not retrieve product information for {currency_pair}")
                 return None
         except Exception as e:
-            print(f"Failed to get market information: {e}")
+            print(f"Failed to get product information: {e}")
             return None
 
     def create_order(self, currency_pair, amount_quote_currency, client_order_id=None, order_type="limit", limit_price_pct=0.01, order_timeout_seconds=600, post_only=True, max_retries=3):
@@ -164,83 +188,39 @@ class ConnectCoinbase():
                     quote_size=str(amount_quote_currency)
                 )
             else:  # limit order
-                # Get current market price for the product
-                market_info = self.get_markets(currency_pair)
-                if not market_info:
-                    print(f"Could not get market price for {currency_pair}")
+                # Get product info (price + increments) in one call
+                product_info = self.get_product_info(currency_pair)
+                if not product_info:
+                    print(f"Could not get product information for {currency_pair}")
                     return None
                 
                 # Calculate limit price with discount from market price
-                market_price = float(market_info['price'])
+                market_price = product_info['price']
                 
                 # Apply discount percentage to calculate limit price
                 # Default is 0.01% below market price to ensure maker status
                 limit_price = market_price * (1 - (limit_price_pct / 100))
                 
-                # Adjust precision based on trading pair
-                # Coinbase requires specific decimal precision for each pair
-                product = self.client.get_product(product_id)
-                price_increment = getattr(product, 'price_increment', None)
-                base_increment = getattr(product, 'base_increment', None)
-                quote_min_size = getattr(product, 'quote_min_size', None)
-                base_min_size = getattr(product, 'base_min_size', None)
-
-                if price_increment:
-                    try:
-                        limit_price = Decimal(str(limit_price)).quantize(Decimal(str(price_increment)), rounding=ROUND_DOWN)
-                    except Exception:
-                        if currency_pair.startswith('BTC'):
-                            limit_price = round(limit_price, 2)
-                        elif currency_pair.startswith('ETH'):
-                            limit_price = round(limit_price, 2)
-                        else:
-                            limit_price = round(limit_price, 2)
-                else:
-                    if currency_pair.startswith('BTC'):
-                        limit_price = round(limit_price, 2)  # BTC typically uses 2 decimal places for price
-                    elif currency_pair.startswith('ETH'):
-                        limit_price = round(limit_price, 2)  # ETH typically uses 2 decimal places for price
-                    else:
-                        limit_price = round(limit_price, 2)  # Default to 2 decimal places for other pairs
+                # Quantize limit_price using helper
+                limit_price = quantize_or_round(limit_price, product_info['price_increment'], 2)
                 
                 print(f"Market price: {market_price}, Limit price: {limit_price}")
                 print(f"Using {limit_price_pct}% discount for limit order")
                 
                 # Calculate base currency amount (how much crypto we're buying)
-                base_size = amount_quote_currency / limit_price
-                # Format to appropriate decimal places based on typical crypto requirements
-                # Most exchanges require BTC to 8 decimal places, ETH to 6, etc.
-                if base_increment:
-                    try:
-                        base_size = Decimal(str(base_size)).quantize(Decimal(str(base_increment)), rounding=ROUND_DOWN)
-                    except Exception:
-                        if currency_pair.startswith('BTC'):
-                            base_size = round(base_size, 8)
-                        elif currency_pair.startswith('ETH'):
-                            base_size = round(base_size, 6)
-                        else:
-                            base_size = round(base_size, 6)  # Default precision
-                else:
-                    if currency_pair.startswith('BTC'):
-                        base_size = round(base_size, 8)
-                    elif currency_pair.startswith('ETH'):
-                        base_size = round(base_size, 6)
-                    else:
-                        base_size = round(base_size, 6)  # Default precision
+                base_size = amount_quote_currency / float(limit_price)
+                
+                # Quantize base_size using helper (default 8 decimals for crypto)
+                base_size = quantize_or_round(base_size, product_info['base_increment'], 8)
 
-                # Validate against product minimum sizes if available
-                try:
-                    if quote_min_size and Decimal(str(amount_quote_currency)) < Decimal(str(quote_min_size)):
-                        print(f"Amount {amount_quote_currency} is below quote_min_size {quote_min_size} for {currency_pair}")
-                        return None
-                except Exception:
-                    pass
-                try:
-                    if base_min_size and Decimal(str(base_size)) < Decimal(str(base_min_size)):
-                        print(f"Computed base_size {base_size} is below base_min_size {base_min_size} for {currency_pair}")
-                        return None
-                except Exception:
-                    pass
+                # Validate minimum sizes
+                if product_info['base_min_size'] and base_size < Decimal(str(product_info['base_min_size'])):
+                    print(f"Base size {base_size} is below minimum {product_info['base_min_size']}")
+                    return None
+                
+                if product_info['quote_min_size'] and amount_quote_currency < float(product_info['quote_min_size']):
+                    print(f"Quote amount {amount_quote_currency} is below minimum {product_info['quote_min_size']}")
+                    return None
                 
                 print(f"Buying {base_size} {currency_pair.split('/')[0]} at {limit_price}")
                 
@@ -438,14 +418,8 @@ class ConnectCoinbase():
                 quote_increment = getattr(product, 'quote_increment', None)
                 quote_min_size = getattr(product, 'quote_min_size', None)
 
-                if quote_increment:
-                    try:
-                        remaining_quote = Decimal(str(remaining_quote)).quantize(Decimal(str(quote_increment)), rounding=ROUND_DOWN)
-                    except Exception:
-                        # Fallback to 2 decimals for quote rounding
-                        remaining_quote = round(remaining_quote, 2)
-                else:
-                    remaining_quote = round(remaining_quote, 2)
+                # Use helper to quantize remaining_quote
+                remaining_quote = quantize_or_round(remaining_quote, quote_increment, 2)
 
                 if quote_min_size and Decimal(str(remaining_quote)) < Decimal(str(quote_min_size)):
                     print(f"Fallback: Remaining {remaining_quote} below quote_min_size {quote_min_size} for {product_id}; skipping market buy.")
