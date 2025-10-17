@@ -27,28 +27,25 @@ class scheduleSetup():
 
     def _set_seconds(self, task, exchange_function):
         schedule.every(task['seconds']).seconds.do(exchange_function)
-        print('Schedule set: every {} seconds | {} {} for {} source currency'.format(
+        print('Schedule set: every {} seconds | {} for {} quote currency'.format(
             task['seconds'],
-            task['buy_or_sell'],
             task['currency_pair'],
             task['quote_currency_amount']
         ))
 
     def _set_hourly(self, task, exchange_function):
         schedule.every().hour.do(exchange_function)
-        print('Schedule set: {} | {} {} for {} source currency'.format(
+        print('Schedule set: {} | {} for {} quote currency'.format(
             task['frequency'], 
-            task['buy_or_sell'], 
             task['currency_pair'],
             task['quote_currency_amount']
         ))
 
     def _set_daily(self, task, exchange_function):
         schedule.every().day.at(task['time']).do(exchange_function)
-        print('Schedule set: {} at {} | {} {} for {} source currency'.format(
+        print('Schedule set: {} at {} | {} for {} quote currency'.format(
             task['frequency'], 
             task['time'],
-            task['buy_or_sell'], 
             task['currency_pair'],
             task['quote_currency_amount']
         ))
@@ -71,11 +68,10 @@ class scheduleSetup():
         
         schedule_job(task['day_of_week'], task['time'])
 
-        print('Schedule set: {} on {} at {} | {} {} for {} source currency'.format(
+        print('Schedule set: {} on {} at {} | {} for {} quote currency'.format(
             task['frequency'],
             task['day_of_week'], 
             task['time'],
-            task['buy_or_sell'], 
             task['currency_pair'],
             task['quote_currency_amount']
         ))
@@ -88,11 +84,10 @@ class scheduleSetup():
         
         schedule.every().day.at(task['time']).do(monthly_job)
 
-        print('Schedule set: {} on day {} at {} | {} {} for {} source currency'.format(
+        print('Schedule set: {} on day {} at {} | {} for {} quote currency'.format(
             task['frequency'],
             task['day_of_month'], 
             task['time'],
-            task['buy_or_sell'], 
             task['currency_pair'],
             task['quote_currency_amount']
         ))

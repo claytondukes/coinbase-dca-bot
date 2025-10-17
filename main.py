@@ -2,8 +2,15 @@
 from bot import auth_coinbase, scheduler
 import logging
 import os
+from dotenv import load_dotenv
 
 if __name__ == '__main__':
+    # Load .env for local (non-Docker) runs
+    try:
+        load_dotenv()
+    except Exception:
+        pass
+
     # Configure logging at process startup if verbose mode is enabled
     verbose_env = os.getenv('COINBASE_VERBOSE', '').strip().lower()
     if verbose_env in ('1', 'true', 'yes', 'on', 'debug'):
