@@ -108,9 +108,9 @@ class scheduleSetup():
 
     def start_schedule(self):
 
-        if 'hourly' in self.frequency_list or 'seconds' in self.frequency_list:
+        if 'seconds' in self.frequency_list:
             sleep_time = 1
-            logger.info('seconds or hourly schedules present')
+            logger.info('seconds schedules present')
             logger.info('set sleep time to 1 second')
         else:
             sleep_time = 60
@@ -121,22 +121,3 @@ class scheduleSetup():
         while True:
             schedule.run_pending()
             time.sleep(sleep_time)
-
-
-if __name__ == '__main__':
-
-    def dummy_function(arg_1):
-        print('dummy function')
-        current_datetime = datetime.utcnow()
-        print("current UTC time is: {}".format(current_datetime))        
-        print(arg_1)
-
-    task_schedule = scheduleSetup('schedule_template.json')
-
-    for task in task_schedule.schedule_data:
-        currency_pair = task['currency_pair']
-        quote_currency_amount = task['quote_currency_amount']
-        task_schedule.create_schedule(task, lambda: dummy_function('test_arg'))
-
-    task_schedule.show_schedule()
-    task_schedule.start_schedule()
