@@ -26,9 +26,9 @@ def quantize_or_round(value, increment, default_decimals):
         try:
             return Decimal(str(value)).quantize(Decimal(str(increment)), rounding=ROUND_DOWN)
         except Exception:
-            return Decimal(str(round(float(value), default_decimals)))
+            return Decimal(str(value)).quantize(Decimal('1e-{}'.format(default_decimals)), rounding=ROUND_DOWN)
     else:
-        return Decimal(str(round(float(value), default_decimals)))
+        return Decimal(str(value)).quantize(Decimal('1e-{}'.format(default_decimals)), rounding=ROUND_DOWN)
 
 class ConnectCoinbase():
     """
@@ -511,7 +511,23 @@ class ConnectCoinbase():
                     product_id=product_id,
                     quote_size=str(remaining_quote)
                 )
-                logger.info(f"Fallback: Placed market buy for remaining {remaining_quote} {product_id} (order_id={order_id})")
+                # Extract new market order ID from response (dict or typed)
+                new_market_order_id = None
+                try:
+                    if hasattr(mo, 'success') and mo.success:
+                        sr = getattr(mo, 'success_response', None)
+                        if isinstance(sr, dict):
+                            new_market_order_id = sr.get('order_id')
+                        else:
+                            new_market_order_id = getattr(sr, 'order_id', None)
+                    elif isinstance(mo, dict):
+                        new_market_order_id = mo.get('order_id')
+                except Exception:
+                    pass
+                logger.info(
+                    f"Fallback: Placed market buy for remaining {remaining_quote} {product_id} "
+                    f"(original_order_id={order_id}, market_order_id={new_market_order_id})"
+                )
             except Exception as e:
                 logger.error(f"Fallback: Failed to place market buy for remaining amount: {e}")
         except Exception as e:
