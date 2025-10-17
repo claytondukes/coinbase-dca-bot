@@ -28,7 +28,7 @@ Coinbase platform.
 
 ### Prerequisites
 
-- Python 3.6+
+- Python 3.11+
 - Coinbase account with API access
 - The required Python packages:
 
