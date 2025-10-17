@@ -1,6 +1,6 @@
 services:
   python-app:
-    image: python:latest
+    image: dcabot:latest
     container_name: dcabot
     volumes:
       - .:/usr/src/app  # Mounts the current directory to the container's '/usr/src/app'
@@ -8,6 +8,7 @@ services:
     working_dir: /usr/src/app
     command: /bin/bash -c "python -u ./main.py >> /usr/src/app/logs/dcabot.log 2>&1"
     restart: always  # Ensures the container always restarts
+    env_file: .env
     build:
       context: .
       dockerfile: Dockerfile

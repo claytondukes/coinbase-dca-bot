@@ -1,0 +1,54 @@
+[
+    {
+        "frequency": "weekly",
+        "day_of_week": "saturday",
+        "day_of_month": null,
+        "time": "15:45",
+        "buy_or_sell": "buy",
+        "currency_pair": "BTC/USDC",
+        "quote_currency_amount": 250,
+        "order_type": "limit",
+        "limit_price_pct": 0.01,
+        "post_only": true,
+        "order_timeout_seconds": 600
+    },
+    {
+        "frequency": "weekly",
+        "day_of_week": "saturday",
+        "day_of_month": null,
+        "time": "15:45",
+        "buy_or_sell": "buy",
+        "currency_pair": "XRP/USDC",
+        "quote_currency_amount": 5.00,
+        "order_type": "limit",
+        "limit_price_pct": 0.01,
+        "post_only": true,
+        "order_timeout_seconds": 600
+    },
+    {
+        "frequency": "weekly",
+        "day_of_week": "saturday",
+        "day_of_month": null,
+        "time": "15:45",
+        "buy_or_sell": "buy",
+        "currency_pair": "ETH/USDC",
+        "quote_currency_amount": 10.00,
+        "order_type": "limit",
+        "limit_price_pct": 0.01,
+        "post_only": true,
+        "order_timeout_seconds": 600
+    },
+    {
+        "frequency": "weekly",
+        "day_of_week": "saturday",
+        "day_of_month": null,
+        "time": "15:45",
+        "buy_or_sell": "buy",
+        "currency_pair": "ADA/USDC",
+        "quote_currency_amount": 4.00,
+        "order_type": "limit",
+        "limit_price_pct": 0.01,
+        "post_only": true,
+        "order_timeout_seconds": 600
+    }
+]
