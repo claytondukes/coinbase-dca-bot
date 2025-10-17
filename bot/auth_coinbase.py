@@ -187,7 +187,7 @@ class ConnectCoinbase():
 
                 if price_increment:
                     try:
-                        limit_price = float(Decimal(str(limit_price)).quantize(Decimal(str(price_increment)), rounding=ROUND_DOWN))
+                        limit_price = Decimal(str(limit_price)).quantize(Decimal(str(price_increment)), rounding=ROUND_DOWN)
                     except Exception:
                         if currency_pair.startswith('BTC'):
                             limit_price = round(limit_price, 2)
@@ -212,7 +212,7 @@ class ConnectCoinbase():
                 # Most exchanges require BTC to 8 decimal places, ETH to 6, etc.
                 if base_increment:
                     try:
-                        base_size = float(Decimal(str(base_size)).quantize(Decimal(str(base_increment)), rounding=ROUND_DOWN))
+                        base_size = Decimal(str(base_size)).quantize(Decimal(str(base_increment)), rounding=ROUND_DOWN)
                     except Exception:
                         if currency_pair.startswith('BTC'):
                             base_size = round(base_size, 8)
@@ -252,15 +252,14 @@ class ConnectCoinbase():
                 
                 try:
                     # Try placing a GTD limit order with expiration time
-                    # Using explicit parameter ordering to match SDK source code exactly
                     order = self.client.limit_order_gtd(
-                        client_order_id,
-                        product_id,
-                        "BUY",
-                        str(base_size),
-                        str(limit_price),
-                        end_time,
-                        post_only
+                        client_order_id=client_order_id,
+                        product_id=product_id,
+                        side="BUY",
+                        base_size=str(base_size),
+                        limit_price=str(limit_price),
+                        end_time=end_time,
+                        post_only=post_only
                     )
                     print("GTD order placed successfully with expiration")
                 except Exception as e:
@@ -441,7 +440,7 @@ class ConnectCoinbase():
 
                 if quote_increment:
                     try:
-                        remaining_quote = float(Decimal(str(remaining_quote)).quantize(Decimal(str(quote_increment)), rounding=ROUND_DOWN))
+                        remaining_quote = Decimal(str(remaining_quote)).quantize(Decimal(str(quote_increment)), rounding=ROUND_DOWN)
                     except Exception:
                         # Fallback to 2 decimals for quote rounding
                         remaining_quote = round(remaining_quote, 2)
