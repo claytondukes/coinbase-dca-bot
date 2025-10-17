@@ -6,6 +6,9 @@ import uuid
 import time
 from decimal import Decimal, ROUND_DOWN
 import threading
+import logging
+
+logger = logging.getLogger(__name__)
 
 def quantize_or_round(value, increment, default_decimals):
     """
@@ -67,16 +70,16 @@ class ConnectCoinbase():
         try:
             accounts = self.client.get_accounts()
             if accounts:
-                print("API credentials verified successfully")
+                logger.info("API credentials verified successfully")
             else:
-                print("Could not retrieve account information")
+                logger.error("Could not retrieve account information")
                 raise RuntimeError("Could not retrieve account information during Coinbase API initialization")
         except Exception as e:
-            print(f"API credentials are incorrect or not set properly: {e}")
+            logger.error(f"API credentials are incorrect or not set properly: {e}")
             raise RuntimeError(f"API credentials are incorrect or not set properly: {e}")
         
         self.current_datetime = datetime.utcnow()
-        print(f"Current UTC time is: {self.current_datetime}")
+        logger.info(f"Current UTC time is: {self.current_datetime}")
     
     def get_balance(self):
         """Get balance information for all accounts."""
@@ -94,17 +97,17 @@ class ConnectCoinbase():
                     'available': float(available_balance),
                     'currency': currency
                 }
-                print(f"{currency}: {available_balance}")
+                logger.info(f"{currency}: {available_balance}")
             
             return balances
         except Exception as e:
-            print(f"Failed to get balance: {e}")
+            logger.error(f"Failed to get balance: {e}")
             return None
 
     def get_product_info(self, currency_pair=None):
         """Get full product information including price and increments."""
         if currency_pair is None:
-            print('No currency pair provided, using default')
+            logger.info('No currency pair provided, using default')
             currency_pair = 'BTC/USDC'
         
         # Convert from BTC/USDC format to BTC-USDC format
@@ -119,12 +122,12 @@ class ConnectCoinbase():
                 try:
                     price_float = float(price)
                 except (TypeError, ValueError):
-                    print(f"Error: Retrieved price for {product_id} is not a valid number: {price}")
+                    logger.error(f"Error: Retrieved price for {product_id} is not a valid number: {price}")
                     return None
                 if price_float <= 0:
-                    print(f"Error: Retrieved price for {product_id} is not positive: {price_float}")
+                    logger.error(f"Error: Retrieved price for {product_id} is not positive: {price_float}")
                     return None
-                print(f"Retrieved {product_id} price: {price_float}")
+                logger.info(f"Retrieved {product_id} price: {price_float}")
                 
                 # Return full product info including increments
                 product_info = {
@@ -141,10 +144,10 @@ class ConnectCoinbase():
                 }
                 return product_info
             else:
-                print(f"Could not retrieve product information for {currency_pair}")
+                logger.error(f"Could not retrieve product information for {currency_pair}")
                 return None
         except Exception as e:
-            print(f"Failed to get product information: {e}")
+            logger.error(f"Failed to get product information: {e}")
             return None
 
     def create_order(self, currency_pair, amount_quote_currency, client_order_id=None, order_type="limit", limit_price_pct=0.01, order_timeout_seconds=600, post_only=True, max_retries=3):
@@ -166,14 +169,21 @@ class ConnectCoinbase():
             dict: Order information if successful, None otherwise
         """
         if not currency_pair or not amount_quote_currency:
-            print("Currency pair and amount are required")
-            return None
+            logger.error("Currency pair and amount are required")
+            return {
+                'success': False,
+                'order_id': None,
+                'product_id': currency_pair.replace('/', '-') if currency_pair else None,
+                'side': 'BUY',
+                'client_order_id': client_order_id,
+                'error': 'Missing currency_pair or amount_quote_currency'
+            }
         
         self.current_datetime = datetime.utcnow()
-        print(f"Current UTC time is: {self.current_datetime}")
-        print(f'Creating {order_type} order')
-        print(f'Currency pair: {currency_pair}')
-        print(f'Amount of quote currency: {amount_quote_currency}')
+        logger.info(f"Current UTC time is: {self.current_datetime}")
+        logger.info(f'Creating {order_type} order')
+        logger.info(f'Currency pair: {currency_pair}')
+        logger.info(f'Amount of quote currency: {amount_quote_currency}')
         
         # Convert from BTC/USDC format to BTC-USDC format
         product_id = currency_pair.replace('/', '-')
@@ -181,9 +191,9 @@ class ConnectCoinbase():
         # Use provided client_order_id or generate a unique one using UUID
         if client_order_id is None:
             client_order_id = str(uuid.uuid4())
-            print(f'Generated client_order_id: {client_order_id}')
+            logger.info(f'Generated client_order_id: {client_order_id}')
         else:
-            print(f'Using provided client_order_id: {client_order_id}')
+            logger.info(f'Using provided client_order_id: {client_order_id}')
         
         try:
             if order_type.lower() == 'market':
@@ -197,8 +207,15 @@ class ConnectCoinbase():
                 # Get product info (price + increments) in one call
                 product_info = self.get_product_info(currency_pair)
                 if not product_info:
-                    print(f"Could not get product information for {currency_pair}")
-                    return None
+                    logger.error(f"Could not get product information for {currency_pair}")
+                    return {
+                        'success': False,
+                        'order_id': None,
+                        'product_id': product_id,
+                        'side': 'BUY',
+                        'client_order_id': client_order_id,
+                        'error': 'Missing product info'
+                    }
                 
                 # Calculate limit price with discount from market price
                 market_price = product_info['price']
@@ -210,39 +227,52 @@ class ConnectCoinbase():
                 # Quantize limit_price using helper
                 limit_price = quantize_or_round(limit_price, product_info['price_increment'], 2)
                 
-                print(f"Market price: {market_price}, Limit price: {limit_price}")
-                print(f"Using {limit_price_pct}% discount for limit order")
+                logger.info(f"Market price: {market_price}, Limit price: {limit_price}")
+                logger.info(f"Using {limit_price_pct}% discount for limit order")
                 
                 # Calculate base currency amount (how much crypto we're buying)
-                base_size = amount_quote_currency / float(limit_price)
+                base_size = (Decimal(str(amount_quote_currency)) / Decimal(str(limit_price)))
                 
                 # Quantize base_size using helper (default 8 decimals for crypto)
                 base_size = quantize_or_round(base_size, product_info['base_increment'], 8)
 
                 # Validate minimum sizes using Decimal for precision
                 if product_info['base_min_size'] and base_size < Decimal(str(product_info['base_min_size'])):
-                    print(f"Base size {base_size} is below minimum {product_info['base_min_size']}")
-                    return None
+                    logger.error(f"Base size {base_size} is below minimum {product_info['base_min_size']}")
+                    return {
+                        'success': False,
+                        'order_id': None,
+                        'product_id': product_id,
+                        'side': 'BUY',
+                        'client_order_id': client_order_id,
+                        'error': f'Base size {base_size} below base_min_size {product_info["base_min_size"]}'
+                    }
                 
-                # Use Decimal for both sides and quantize to quote_increment if available
+                # Use Decimal for both sides; quantize only the amount to the increment (do not lower the platform minimum)
                 if product_info['quote_min_size']:
                     quote_increment = product_info.get('quote_increment')
                     min_quote = Decimal(str(product_info['quote_min_size']))
                     amt_quote = Decimal(str(amount_quote_currency))
-                    
                     if quote_increment:
-                        min_quote = min_quote.quantize(Decimal(str(quote_increment)), rounding=ROUND_DOWN)
                         amt_quote = amt_quote.quantize(Decimal(str(quote_increment)), rounding=ROUND_DOWN)
-                    
+                    else:
+                        amt_quote = amt_quote.quantize(Decimal('0.01'), rounding=ROUND_DOWN)
                     if amt_quote < min_quote:
-                        print(f"Quote amount {amt_quote} is below minimum {min_quote}")
-                        return None
+                        logger.error(f"Quote amount {amt_quote} is below minimum {min_quote}")
+                        return {
+                            'success': False,
+                            'order_id': None,
+                            'product_id': product_id,
+                            'side': 'BUY',
+                            'client_order_id': client_order_id,
+                            'error': f'Amount {amt_quote} below quote_min_size {min_quote}'
+                        }
                 
-                print(f"Buying {base_size} {currency_pair.split('/')[0]} at {limit_price}")
+                logger.info(f"Buying {base_size} {currency_pair.split('/')[0]} at {limit_price}")
                 
                 # Calculate end_time for limit orders (RFC3339 format)
                 end_time = (datetime.utcnow() + timedelta(seconds=order_timeout_seconds)).strftime('%Y-%m-%dT%H:%M:%SZ')
-                print(f"Order will expire at: {end_time} ({order_timeout_seconds} seconds from now)")
+                logger.info(f"Order will expire at: {end_time} ({order_timeout_seconds} seconds from now)")
                 
                 # Debug logging is configured at process startup if verbose=True
                 
@@ -257,10 +287,10 @@ class ConnectCoinbase():
                         end_time=end_time,
                         post_only=post_only
                     )
-                    print("GTD order placed successfully with expiration")
+                    logger.info("GTD order placed successfully with expiration")
                 except Exception as e:
-                    print(f"GTD order failed: {e}")
-                    print("Falling back to GTC order without expiration")
+                    logger.warning(f"GTD order failed: {e}")
+                    logger.info("Falling back to GTC order without expiration")
                     
                     # Fall back to GTC limit order without expiration
                     order = self.client.limit_order_gtc(
@@ -309,7 +339,7 @@ class ConnectCoinbase():
             
             # Handle CreateOrderResponse object attributes
             if hasattr(order, 'success') and order.success:
-                print("Order placed successfully")
+                logger.info("Order placed successfully")
                 
                 # Extract order details from success_response dictionary
                 if hasattr(order, 'success_response'):
@@ -323,16 +353,23 @@ class ConnectCoinbase():
                         side = success_response.get('side', 'Unknown')
                         client_id = success_response.get('client_order_id', 'Unknown')
                         
-                        print(f"Order ID: {order_id if order_id else 'Not available'}")
-                        print(f"Product: {sr_product_id}")
-                        print(f"Side: {side}")
-                        print(f"Client Order ID: {client_id}")
+                        logger.info(f"Order ID: {order_id if order_id else 'Not available'}")
+                        logger.info(f"Product: {sr_product_id}")
+                        logger.info(f"Side: {side}")
+                        logger.info(f"Client Order ID: {client_id}")
 
                         # Start fallback-to-market monitor only for limit orders
                         if order_type.lower() != 'market' and order_id:
                             self._start_fallback_thread(sr_product_id, order_id, amount_quote_currency, order_timeout_seconds)
 
-                        return success_response
+                        return {
+                            'success': True,
+                            'order_id': order_id,
+                            'product_id': sr_product_id,
+                            'side': side,
+                            'client_order_id': client_id,
+                            'error': None
+                        }
                     else:
                         # Handle typed success object
                         order_id = getattr(success_response, 'order_id', None)
@@ -340,33 +377,56 @@ class ConnectCoinbase():
                         side = getattr(success_response, 'side', 'Unknown')
                         client_id = getattr(success_response, 'client_order_id', 'Unknown')
 
-                        print(f"Order ID: {order_id if order_id else 'Not available'}")
-                        print(f"Product: {sr_product_id}")
-                        print(f"Side: {side}")
-                        print(f"Client Order ID: {client_id}")
+                        logger.info(f"Order ID: {order_id if order_id else 'Not available'}")
+                        logger.info(f"Product: {sr_product_id}")
+                        logger.info(f"Side: {side}")
+                        logger.info(f"Client Order ID: {client_id}")
 
                         if order_type.lower() != 'market' and order_id:
                             self._start_fallback_thread(sr_product_id, order_id, amount_quote_currency, order_timeout_seconds)
                         
                         # Return a basic dict for consistency
                         return {
+                            'success': True,
                             'order_id': order_id,
                             'product_id': sr_product_id,
                             'side': side,
-                            'client_order_id': client_id
+                            'client_order_id': client_id,
+                            'error': None
                         }
                 else:
-                    print("Order successful but no details available")
+                    logger.info("Order successful but no details available")
                 
-                return {}
+                return {
+                    'success': True,
+                    'order_id': None,
+                    'product_id': product_id,
+                    'side': 'BUY',
+                    'client_order_id': client_order_id,
+                    'error': None
+                }
             else:
                 error_msg = order.error_response if hasattr(order, 'error_response') else 'Unknown error'
-                print(f"Failed to create order: {error_msg}")
-                return None
+                logger.error(f"Failed to create order: {error_msg}")
+                return {
+                    'success': False,
+                    'order_id': None,
+                    'product_id': product_id,
+                    'side': 'BUY',
+                    'client_order_id': client_order_id,
+                    'error': str(error_msg)
+                }
                 
         except Exception as e:
-            print(f'Failed to create order: {e}')
-            return None
+            logger.error(f'Failed to create order: {e}')
+            return {
+                'success': False,
+                'order_id': None,
+                'product_id': product_id,
+                'side': 'BUY',
+                'client_order_id': client_order_id,
+                'error': str(e)
+            }
 
     def _start_fallback_thread(self, product_id, order_id, original_quote_amount, timeout_seconds):
         """Spawn a background thread to enforce fallback-to-market after timeout."""
@@ -416,17 +476,17 @@ class ConnectCoinbase():
             if filled_value == 0.0 and filled_size and avg_price:
                 filled_value = filled_size * avg_price
 
-            remaining_quote = float(original_quote_amount) - filled_value
-            if remaining_quote <= 0:
-                print(f"Fallback: Nothing remaining to buy for order {order_id}; status={status}")
+            remaining_quote = Decimal(str(original_quote_amount)) - Decimal(str(filled_value))
+            if remaining_quote <= Decimal('0'):
+                logger.info(f"Fallback: Nothing remaining to buy for order {order_id}; status={status}")
                 return
 
             # Attempt to cancel any remaining order (safe if already expired/cancelled)
             try:
                 self.client.cancel_orders([order_id])
-                print(f"Fallback: Cancel request sent for order {order_id}")
+                logger.info(f"Fallback: Cancel request sent for order {order_id}")
             except Exception as e:
-                print(f"Fallback: Cancel failed or not needed for {order_id}: {e}")
+                logger.warning(f"Fallback: Cancel failed or not needed for {order_id}: {e}")
 
             # Round remaining quote by quote_increment and ensure >= quote_min_size
             try:
@@ -438,10 +498,10 @@ class ConnectCoinbase():
                 remaining_quote = quantize_or_round(remaining_quote, quote_increment, 2)
 
                 if quote_min_size and Decimal(str(remaining_quote)) < Decimal(str(quote_min_size)):
-                    print(f"Fallback: Remaining {remaining_quote} below quote_min_size {quote_min_size} for {product_id}; skipping market buy.")
+                    logger.info(f"Fallback: Remaining {remaining_quote} below quote_min_size {quote_min_size} for {product_id}; skipping market buy.")
                     return
             except Exception as e:
-                print(f"Fallback: Failed to prepare remaining quote rounding/min check: {e}")
+                logger.warning(f"Fallback: Failed to prepare remaining quote rounding/min check: {e}")
 
             # Place market order for the remaining amount
             try:
@@ -451,11 +511,11 @@ class ConnectCoinbase():
                     product_id=product_id,
                     quote_size=str(remaining_quote)
                 )
-                print(f"Fallback: Placed market buy for remaining {remaining_quote} {product_id} (order_id={order_id})")
+                logger.info(f"Fallback: Placed market buy for remaining {remaining_quote} {product_id} (order_id={order_id})")
             except Exception as e:
-                print(f"Fallback: Failed to place market buy for remaining amount: {e}")
+                logger.error(f"Fallback: Failed to place market buy for remaining amount: {e}")
         except Exception as e:
-            print(f"Fallback worker error: {e}")
+            logger.error(f"Fallback worker error: {e}")
 
 
 if __name__ == '__main__':
