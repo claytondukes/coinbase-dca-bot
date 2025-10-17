@@ -1,7 +1,7 @@
 # Crypto DCA Bot
 
 A tool to automate scheduled cryptocurrency purchases on Coinbase Advanced
-Trader (previously branded as Coinbase Pro).
+Trade (previously branded as Coinbase Pro).
 
 Frequently used for DCA (Dollar-Cost Averaging) investment strategies to reduce
 market volatility impact by making regular, fixed-amount purchases regardless of
@@ -9,7 +9,7 @@ price.
 
 ## Features
 
-- Schedule cryptocurrency purchases on a daily or weekly basis
+- Schedule cryptocurrency purchases on a seconds, hourly, daily, weekly, or monthly basis
 - Configure purchases for multiple currency pairs
 - Specify the exact time and day for transactions
 - Supports post-only limit (maker) and market (taker) orders; optional
