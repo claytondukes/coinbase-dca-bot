@@ -1,33 +1,36 @@
 #!/usr/bin/env python3
 from bot import auth_coinbase, scheduler
 import logging
-import os
+import time
+import datetime
 try:
     from dotenv import load_dotenv
-except Exception:
+except ImportError:
     def load_dotenv(*args, **kwargs):
         return None
 
 if __name__ == '__main__':
     # Load .env for local (non-Docker) runs
+    load_dotenv()
+    # Apply TZ from environment (if provided)
     try:
-        load_dotenv()
-    except Exception:
+        time.tzset()
+    except AttributeError:
         pass
 
     # Configure logging at process startup if verbose mode is enabled
-    verbose_env = os.getenv('COINBASE_VERBOSE', '').strip().lower()
-    if verbose_env in ('1', 'true', 'yes', 'on', 'debug'):
-        logging.basicConfig(
-            level=logging.DEBUG,
-            format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-        )
+    level = logging.DEBUG if auth_coinbase.parse_bool_env('COINBASE_VERBOSE') else logging.INFO
+    logging.basicConfig(
+        level=level,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    )
     
-    print('start DCA bot')
-    print('Connecting to Coinbase API')
+    logging.info('start DCA bot')
+    logging.info("Startup local time: %s TZ: %s", datetime.datetime.now(), time.tzname)
+    logging.info('Connecting to Coinbase API')
     coinbase = auth_coinbase.ConnectCoinbase()
 
-    print('Setting Schedules')
+    logging.info('Setting Schedules')
     task_schedule = scheduler.scheduleSetup('schedule.json')
 
     for task in task_schedule.schedule_data:

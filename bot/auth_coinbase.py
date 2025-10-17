@@ -9,6 +9,12 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+def parse_bool_env(name, default=False):
+    v = os.getenv(name)
+    if v is None:
+        return default
+    return v.strip().lower() in ('1', 'true', 'yes', 'on', 'debug')
+
 def quantize_or_round(value, increment, default_decimals):
     """
     Helper to quantize a value by increment or fall back to rounding.
@@ -56,12 +62,7 @@ class ConnectCoinbase():
             self.api_secret = s
 
         # Initialize the Coinbase client with verbose logging for diagnostics
-        v = os.getenv('COINBASE_VERBOSE')
-        verbose_flag = False
-        if v is not None:
-            vv = v.strip().lower()
-            verbose_flag = vv in ('1', 'true', 'yes', 'on', 'debug')
-        self.verbose = verbose_flag
+        self.verbose = parse_bool_env('COINBASE_VERBOSE')
         self.client = RESTClient(api_key=self.api_key, api_secret=self.api_secret, verbose=self.verbose)
         
         # Verify connection by getting account information
@@ -76,8 +77,6 @@ class ConnectCoinbase():
             logger.error(f"API credentials are incorrect or not set properly: {e}")
             raise RuntimeError(f"API credentials are incorrect or not set properly: {e}")
         
-        self.current_datetime = datetime.utcnow()
-        logger.info(f"Current UTC time is: {self.current_datetime}")
     
     def get_balance(self):
         """Get balance information for all accounts."""
@@ -177,8 +176,12 @@ class ConnectCoinbase():
                 'error': 'Missing currency_pair or amount_quote_currency'
             }
         
-        self.current_datetime = datetime.utcnow()
-        logger.info(f"Current UTC time is: {self.current_datetime}")
+        self.current_datetime = datetime.now()
+        try:
+            tz = time.tzname[time.localtime().tm_isdst] if time.daylight else time.tzname[0]
+        except Exception:
+            tz = str(time.tzname)
+        logger.info(f"Current local time is: {self.current_datetime} TZ: {tz}")
         logger.info(f'Creating {order_type} order')
         logger.info(f'Currency pair: {currency_pair}')
         logger.info(f'Amount of quote currency: {amount_quote_currency}')
@@ -195,11 +198,36 @@ class ConnectCoinbase():
         
         try:
             if order_type.lower() == 'market':
-                # Use market order with quote size (amount of quote currency to spend)
+                product_info = self.get_product_info(currency_pair)
+                if not product_info:
+                    logger.error(f"Could not get product information for {currency_pair}")
+                    return {
+                        'success': False,
+                        'order_id': None,
+                        'product_id': product_id,
+                        'side': 'BUY',
+                        'client_order_id': client_order_id,
+                        'error': 'Missing product info'
+                    }
+
+                quote_increment = product_info.get('quote_increment')
+                quote_min_size = product_info.get('quote_min_size')
+                quantized_amount = quantize_or_round(amount_quote_currency, quote_increment, 2)
+                if quote_min_size and Decimal(str(quantized_amount)) < Decimal(str(quote_min_size)):
+                    logger.error(f"Amount {quantized_amount} is below minimum quote size {quote_min_size} for {currency_pair}")
+                    return {
+                        'success': False,
+                        'order_id': None,
+                        'product_id': product_id,
+                        'side': 'BUY',
+                        'client_order_id': client_order_id,
+                        'error': f'Amount {quantized_amount} below quote_min_size {quote_min_size}'
+                    }
+                logger.info(f"Placing market order with quote_size={quantized_amount}")
                 order = self.client.market_order_buy(
                     client_order_id=client_order_id,
                     product_id=product_id,
-                    quote_size=str(amount_quote_currency)
+                    quote_size=str(quantized_amount)
                 )
             else:  # limit order
                 # Get product info (price + increments) in one call
