@@ -81,12 +81,15 @@ class ConnectCoinbase():
     def get_balance(self):
         """Get balance information for all accounts."""
         try:
-            accounts = self.client.get_accounts()
+            resp = self.client.get_accounts()
             balances = {}
             
-            for account in accounts:
-                currency = account.get('currency', '')
-                available_balance = account.get('available_balance', {}).get('value', '0')
+            # Access accounts list from typed response
+            accounts_list = getattr(resp, 'accounts', [])
+            for account in accounts_list:
+                currency = getattr(account, 'currency', '')
+                available_balance_obj = getattr(account, 'available_balance', None)
+                available_balance = getattr(available_balance_obj, 'value', '0') if available_balance_obj else '0'
                 balances[currency] = {
                     'available': float(available_balance),
                     'currency': currency
@@ -151,10 +154,13 @@ class ConnectCoinbase():
         Args:
             currency_pair (str): Currency pair in format 'BTC/USDC'
             amount_quote_currency (float): Amount of quote currency to spend
+            client_order_id (str): Optional client-provided order ID
             order_type (str): Order type to create ('market' or 'limit')
             limit_price_pct (float): For limit orders, percent of 100 to set as limit price
                                     (e.g., 0.01 means 0.01% below current price)
-            max_retries (int): Maximum number of retries for limit order price checks (not currently used for price checks)
+            order_timeout_seconds (int): Seconds until limit order expires (GTD orders)
+            post_only (bool): If True, limit order will only be placed as maker
+            max_retries (int): Reserved for future use (order monitoring/retry logic)
             
         Returns:
             dict: Order information if successful, None otherwise
@@ -213,14 +219,24 @@ class ConnectCoinbase():
                 # Quantize base_size using helper (default 8 decimals for crypto)
                 base_size = quantize_or_round(base_size, product_info['base_increment'], 8)
 
-                # Validate minimum sizes
+                # Validate minimum sizes using Decimal for precision
                 if product_info['base_min_size'] and base_size < Decimal(str(product_info['base_min_size'])):
                     print(f"Base size {base_size} is below minimum {product_info['base_min_size']}")
                     return None
                 
-                if product_info['quote_min_size'] and amount_quote_currency < float(product_info['quote_min_size']):
-                    print(f"Quote amount {amount_quote_currency} is below minimum {product_info['quote_min_size']}")
-                    return None
+                # Use Decimal for both sides and quantize to quote_increment if available
+                if product_info['quote_min_size']:
+                    quote_increment = product_info.get('quote_increment')
+                    min_quote = Decimal(str(product_info['quote_min_size']))
+                    amt_quote = Decimal(str(amount_quote_currency))
+                    
+                    if quote_increment:
+                        min_quote = min_quote.quantize(Decimal(str(quote_increment)), rounding=ROUND_DOWN)
+                        amt_quote = amt_quote.quantize(Decimal(str(quote_increment)), rounding=ROUND_DOWN)
+                    
+                    if amt_quote < min_quote:
+                        print(f"Quote amount {amt_quote} is below minimum {min_quote}")
+                        return None
                 
                 print(f"Buying {base_size} {currency_pair.split('/')[0]} at {limit_price}")
                 

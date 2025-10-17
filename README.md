@@ -1,7 +1,7 @@
 # Crypto DCA Bot
 
 A tool to automate scheduled cryptocurrency purchases on Coinbase Advanced
-Trader (Previously branded as Coinbase Pro).
+Trader (previously branded as Coinbase Pro).
 
 Frequently used for DCA (Dollar-Cost Averaging) investment strategies to reduce
 market volatility impact by making regular, fixed-amount purchases regardless of
