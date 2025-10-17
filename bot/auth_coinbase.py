@@ -1,5 +1,4 @@
 from coinbase.rest import RESTClient
-from dotenv import load_dotenv
 import os
 from datetime import datetime, timedelta
 import uuid
@@ -38,7 +37,6 @@ class ConnectCoinbase():
 
     def __init__(self):
         """Initialize the Coinbase connection using API keys from environment variables."""
-        load_dotenv()
         self.api_key = os.getenv('COINBASE_API_KEY')
         self.api_secret = os.getenv('COINBASE_API_SECRET')
 
@@ -539,5 +537,5 @@ if __name__ == '__main__':
     coinbase = ConnectCoinbase()
     # Uncomment these lines to test functionality
     # coinbase.get_balance()
-    # coinbase.get_markets('BTC/USDC')
-    # coinbase.create_order('BTC/USDC', 10)
+    # coinbase.get_product_info('BTC/USDC')
+    # coinbase.create_order('BTC/USDC', 10, order_type='market')
