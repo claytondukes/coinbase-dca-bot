@@ -536,6 +536,58 @@ class ConnectCoinbase():
             except Exception as e:
                 logger.warning(f"Fallback: Cancel failed or not needed for {order_id}: {e}")
 
+            # After sending cancel, poll until order reaches a terminal state, then recompute remaining
+            try:
+                terminal_statuses = {"CANCELLED", "EXPIRED", "FILLED", "REJECTED", "FAILED"}
+                deadline = time.time() + 15  # wait up to 15s for terminal state
+                latest_filled_value = filled_value
+                latest_status = status
+                while time.time() < deadline:
+                    try:
+                        ord_resp = self.client.get_order(order_id)
+                        ord_obj = getattr(ord_resp, 'order', None)
+                        if ord_obj is None and isinstance(ord_resp, dict):
+                            ord_obj = ord_resp.get('order', ord_resp)
+                        if isinstance(ord_obj, dict):
+                            latest_status = ord_obj.get('status')
+                            fv2 = ord_obj.get('filled_value')
+                            fs2 = ord_obj.get('filled_size')
+                            ap2 = ord_obj.get('average_filled_price')
+                        else:
+                            latest_status = getattr(ord_obj, 'status', None)
+                            fv2 = getattr(ord_obj, 'filled_value', None)
+                            fs2 = getattr(ord_obj, 'filled_size', None)
+                            ap2 = getattr(ord_obj, 'average_filled_price', None)
+                        try:
+                            latest_filled_value = float(fv2) if fv2 is not None else 0.0
+                        except Exception:
+                            latest_filled_value = 0.0
+                        # Derive from size*avg if needed
+                        try:
+                            fs_f = float(fs2) if fs2 is not None else 0.0
+                        except Exception:
+                            fs_f = 0.0
+                        try:
+                            ap_f = float(ap2) if ap2 is not None else None
+                        except Exception:
+                            ap_f = None
+                        if latest_filled_value == 0.0 and fs_f and ap_f:
+                            latest_filled_value = fs_f * ap_f
+
+                        if latest_status in terminal_statuses:
+                            break
+                    except Exception:
+                        pass
+                    time.sleep(0.5)
+
+                # Recompute remaining from latest fill
+                remaining_quote = Decimal(str(original_quote_amount)) - Decimal(str(latest_filled_value))
+                if remaining_quote <= Decimal('0'):
+                    logger.info(f"Fallback: Nothing remaining to buy after cancel poll for order {order_id}; status={latest_status}")
+                    return
+            except Exception as e:
+                logger.warning(f"Fallback: Poll after cancel encountered an issue, proceeding cautiously: {e}")
+
             # Round remaining quote by quote_increment and ensure >= quote_min_size
             try:
                 product = self.client.get_product(product_id)
