@@ -2,6 +2,9 @@ import schedule
 import time
 import json
 from datetime import datetime
+import logging
+
+logger = logging.getLogger(__name__)
 
 class scheduleSetup():
     def __init__(self, json_schedule):
@@ -27,7 +30,7 @@ class scheduleSetup():
 
     def _set_seconds(self, task, exchange_function):
         schedule.every(task['seconds']).seconds.do(exchange_function)
-        print('Schedule set: every {} seconds | {} for {} quote currency'.format(
+        logger.info('Schedule set: every {} seconds | {} for {} quote currency'.format(
             task['seconds'],
             task['currency_pair'],
             task['quote_currency_amount']
@@ -35,7 +38,7 @@ class scheduleSetup():
 
     def _set_hourly(self, task, exchange_function):
         schedule.every().hour.do(exchange_function)
-        print('Schedule set: {} | {} for {} quote currency'.format(
+        logger.info('Schedule set: {} | {} for {} quote currency'.format(
             task['frequency'], 
             task['currency_pair'],
             task['quote_currency_amount']
@@ -43,7 +46,7 @@ class scheduleSetup():
 
     def _set_daily(self, task, exchange_function):
         schedule.every().day.at(task['time']).do(exchange_function)
-        print('Schedule set: {} at {} | {} for {} quote currency'.format(
+        logger.info('Schedule set: {} at {} | {} for {} quote currency'.format(
             task['frequency'], 
             task['time'],
             task['currency_pair'],
@@ -64,11 +67,11 @@ class scheduleSetup():
             if day.lower() in days:
                 days[day.lower()].at(time).do(exchange_function)
             else:
-                print("Invalid day of the week")
+                logger.error("Invalid day of the week")
         
         schedule_job(task['day_of_week'], task['time'])
 
-        print('Schedule set: {} on {} at {} | {} for {} quote currency'.format(
+        logger.info('Schedule set: {} on {} at {} | {} for {} quote currency'.format(
             task['frequency'],
             task['day_of_week'], 
             task['time'],
@@ -84,7 +87,7 @@ class scheduleSetup():
         
         schedule.every().day.at(task['time']).do(monthly_job)
 
-        print('Schedule set: {} on day {} at {} | {} for {} quote currency'.format(
+        logger.info('Schedule set: {} on day {} at {} | {} for {} quote currency'.format(
             task['frequency'],
             task['day_of_month'], 
             task['time'],
@@ -93,25 +96,28 @@ class scheduleSetup():
         ))
 
     def _other_schedule(self, task, exchange_function):
-        print('no valid "frequency" key:value in schedule configuration found')
+        logger.error('no valid "frequency" key:value in schedule configuration found')
 
     def show_schedule(self):
-        print('Scheduled jobs:')
+        logger.info('Scheduled jobs:')
         for job in schedule.jobs:
-            print(job)
+            try:
+                logger.info(f"{job} | next_run={job.next_run}")
+            except Exception:
+                logger.info(str(job))
 
     def start_schedule(self):
 
         if 'hourly' in self.frequency_list or 'seconds' in self.frequency_list:
             sleep_time = 1
-            print('hourly or less frequent schedule exists')
-            print('set sleep time to 1 second')
+            logger.info('seconds or hourly schedules present')
+            logger.info('set sleep time to 1 second')
         else:
             sleep_time = 60
-            print('more frequent than hourly schedules only')
-            print('set sleep time to 60 seconds')
+            logger.info('no seconds/hourly schedules present')
+            logger.info('set sleep time to 60 seconds')
         
-        print('*** start schedule ***')
+        logger.info('*** start schedule ***')
         while True:
             schedule.run_pending()
             time.sleep(sleep_time)

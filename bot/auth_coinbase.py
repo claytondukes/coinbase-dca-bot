@@ -273,7 +273,29 @@ class ConnectCoinbase():
                         'client_order_id': client_order_id,
                         'error': f'Base size {base_size} below base_min_size {product_info["base_min_size"]}'
                     }
-                
+
+                # After base_size quantization, ensure notional still meets quote_min_size
+                try:
+                    min_quote_sz = product_info.get('quote_min_size')
+                    if min_quote_sz is not None:
+                        notional = (Decimal(str(base_size)) * Decimal(str(limit_price)))
+                        if notional < Decimal(str(min_quote_sz)):
+                            logger.error(
+                                f"Notional {notional} below quote_min_size {min_quote_sz} after quantization; "
+                                f"increase quote amount or adjust increments."
+                            )
+                            return {
+                                'success': False,
+                                'order_id': None,
+                                'product_id': product_id,
+                                'side': 'BUY',
+                                'client_order_id': client_order_id,
+                                'error': f'Notional {notional} below quote_min_size {min_quote_sz} after quantization'
+                            }
+                except Exception:
+                    # If any issue computing notional, proceed; server-side validation will enforce
+                    pass
+
                 # Use Decimal for both sides; quantize only the amount to the increment (do not lower the platform minimum)
                 if product_info['quote_min_size']:
                     quote_increment = product_info.get('quote_increment')
