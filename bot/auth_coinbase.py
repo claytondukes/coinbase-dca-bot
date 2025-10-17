@@ -50,10 +50,10 @@ class ConnectCoinbase():
                 print("API credentials verified successfully")
             else:
                 print("Could not retrieve account information")
-                exit(1)
+                raise RuntimeError("Could not retrieve account information during Coinbase API initialization")
         except Exception as e:
             print(f"API credentials are incorrect or not set properly: {e}")
-            exit(1)
+            raise RuntimeError(f"API credentials are incorrect or not set properly: {e}")
         
         self.current_datetime = datetime.utcnow()
         print(f"Current UTC time is: {self.current_datetime}")
@@ -92,13 +92,22 @@ class ConnectCoinbase():
             if product:
                 # Access price as an attribute of the product object (not as a dictionary)
                 # The Coinbase API returns a GetProductResponse object, not a dictionary
-                price = getattr(product, 'price', '0')
-                print(f"Retrieved {product_id} price: {price}")
+                price = getattr(product, 'price', None)
+                # Validate price
+                try:
+                    price_float = float(price)
+                except (TypeError, ValueError):
+                    print(f"Error: Retrieved price for {product_id} is not a valid number: {price}")
+                    return None
+                if price_float <= 0:
+                    print(f"Error: Retrieved price for {product_id} is not positive: {price_float}")
+                    return None
+                print(f"Retrieved {product_id} price: {price_float}")
                 
                 market_info = {
                     'symbol': currency_pair,
                     'id': product_id,
-                    'price': price,
+                    'price': price_float,
                     'base': currency_pair.split('/')[0],
                     'quote': currency_pair.split('/')[1]
                 }
@@ -119,9 +128,9 @@ class ConnectCoinbase():
             currency_pair (str): Currency pair in format 'BTC/USDC'
             amount_quote_currency (float): Amount of quote currency to spend
             order_type (str): Order type to create ('market' or 'limit')
-            limit_price_pct (float): For limit orders, percentage of current price to set as limit
-                                    (e.g., 0.999 means 99.9% of market price, making you a maker)
-            max_retries (int): Maximum number of retries for limit order price checks
+            limit_price_pct (float): For limit orders, percent of 100 to set as limit price
+                                    (e.g., 0.01 means 0.01% below current price)
+            max_retries (int): Maximum number of retries for limit order price checks (not currently used for price checks)
             
         Returns:
             dict: Order information if successful, None otherwise
@@ -139,9 +148,12 @@ class ConnectCoinbase():
         # Convert from BTC/USDC format to BTC-USDC format
         product_id = currency_pair.replace('/', '-')
         
-        # Generate a unique client_order_id using UUID
-        client_order_id = str(uuid.uuid4())
-        print(f'Generated client_order_id: {client_order_id}')
+        # Use provided client_order_id or generate a unique one using UUID
+        if client_order_id is None:
+            client_order_id = str(uuid.uuid4())
+            print(f'Generated client_order_id: {client_order_id}')
+        else:
+            print(f'Using provided client_order_id: {client_order_id}')
         
         try:
             if order_type.lower() == 'market':
