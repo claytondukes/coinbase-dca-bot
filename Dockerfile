@@ -1,14 +1,20 @@
-# Use the official Python image from Docker Hub
 FROM python:3.11-slim
 
-# Install tzdata for timezone support
-RUN apt-get update && apt-get install -y tzdata && rm -rf /var/lib/apt/lists/*
+ENV TZ=Etc/UTC
+ENV DEBIAN_FRONTEND=noninteractive
 
-# Set the working directory in the container
+# Install tzdata non-interactively and clean apt lists
+RUN apt-get update -yqq \
+ && apt-get install -yqq --no-install-recommends tzdata \
+ && ln -fs /usr/share/zoneinfo/$TZ /etc/localtime \
+ && dpkg-reconfigure -f noninteractive tzdata \
+ && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /usr/src/app
 
-# Copy the current directory contents into the container at /usr/src/app
-COPY . .
-
-# Install any needed packages specified in requirements.txt
+# Leverage layer caching for dependencies
+COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy the rest of the source
+COPY . .
