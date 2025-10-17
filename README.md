@@ -19,7 +19,7 @@ price.
 
 ## Background
 
-Using the Coinbase Advanced Trader API automates time-based cryptocurrency
+Using the Coinbase Advanced Trade API automates time-based cryptocurrency
 purchases and helps minimize fees. Executing trades directly through Advanced
 Trade reduces transaction costs compared to recurring buys on the standard
 Coinbase platform.
@@ -126,16 +126,19 @@ The project includes Docker configuration for easy deployment and automated
 restarts.
 
 1. Docker and Docker Compose must be installed.
-2. A `logs` directory in the project root is required.
-3. Start the container:
+2. Start the container:
 
 ```bash
 docker compose build
 docker compose up -d
 ```
 
-The container runs the bot in the background with automatic restarts and logs to
-`logs/dcabot.log`.
+The container runs the bot in the background with automatic restarts. View
+logs with:
+
+```bash
+docker compose logs -f --tail=100
+```
 
 ## Notes
 
