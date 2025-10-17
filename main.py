@@ -3,6 +3,7 @@ from bot import auth_coinbase, scheduler
 import logging
 import time
 import datetime
+import os
 try:
     from dotenv import load_dotenv
 except ImportError:
@@ -31,7 +32,9 @@ if __name__ == '__main__':
     coinbase = auth_coinbase.ConnectCoinbase()
 
     logging.info('Setting Schedules')
-    task_schedule = scheduler.scheduleSetup('schedule.json')
+    schedule_file = os.getenv('SCHEDULE_FILE', 'schedule.json')
+    logging.info('Loading schedule file: %s', schedule_file)
+    task_schedule = scheduler.scheduleSetup(schedule_file)
 
     for task in task_schedule.schedule_data:
         currency_pair = task['currency_pair']
