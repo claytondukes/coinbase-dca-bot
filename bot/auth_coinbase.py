@@ -4,6 +4,8 @@ import os
 from datetime import datetime, timedelta
 import uuid
 import time
+from decimal import Decimal, ROUND_DOWN
+import threading
 
 class ConnectCoinbase():
     """
@@ -17,8 +19,29 @@ class ConnectCoinbase():
         self.api_key = os.getenv('COINBASE_API_KEY')
         self.api_secret = os.getenv('COINBASE_API_SECRET')
 
-        # Initialize the Coinbase client
-        self.client = RESTClient(api_key=self.api_key, api_secret=self.api_secret)
+        # Sanitize API key (remove wrapping quotes and trim)
+        if self.api_key:
+            k = self.api_key.strip()
+            if (k.startswith('"') and k.endswith('"')) or (k.startswith("'") and k.endswith("'")):
+                k = k[1:-1]
+            self.api_key = k
+
+        # Normalize EC private key: convert literal "\n" to real newlines, strip quotes/whitespace
+        if self.api_secret:
+            s = self.api_secret.strip()
+            if (s.startswith('"') and s.endswith('"')) or (s.startswith("'") and s.endswith("'")):
+                s = s[1:-1]
+            s = s.replace("\\n", "\n").replace("\\r", "\r")
+            self.api_secret = s
+
+        # Initialize the Coinbase client with verbose logging for diagnostics
+        v = os.getenv('COINBASE_VERBOSE')
+        verbose_flag = False
+        if v is not None:
+            vv = v.strip().lower()
+            verbose_flag = vv in ('1', 'true', 'yes', 'on', 'debug')
+        self.verbose = verbose_flag
+        self.client = RESTClient(api_key=self.api_key, api_secret=self.api_secret, verbose=self.verbose)
         
         # Verify connection by getting account information
         try:
@@ -88,7 +111,7 @@ class ConnectCoinbase():
             print(f"Failed to get market information: {e}")
             return None
 
-    def create_order(self, currency_pair, amount_quote_currency, client_order_id=None, order_type="limit", limit_price_pct=0.01, order_timeout_seconds=600, max_retries=3):
+    def create_order(self, currency_pair, amount_quote_currency, client_order_id=None, order_type="limit", limit_price_pct=0.01, order_timeout_seconds=600, post_only=True, max_retries=3):
         """
         Create a buy order for cryptocurrency using quote currency amount.
         
@@ -144,12 +167,29 @@ class ConnectCoinbase():
                 
                 # Adjust precision based on trading pair
                 # Coinbase requires specific decimal precision for each pair
-                if currency_pair.startswith('BTC'):
-                    limit_price = round(limit_price, 2)  # BTC typically uses 2 decimal places for price
-                elif currency_pair.startswith('ETH'):
-                    limit_price = round(limit_price, 2)  # ETH typically uses 2 decimal places for price
+                product = self.client.get_product(product_id)
+                price_increment = getattr(product, 'price_increment', None)
+                base_increment = getattr(product, 'base_increment', None)
+                quote_min_size = getattr(product, 'quote_min_size', None)
+                base_min_size = getattr(product, 'base_min_size', None)
+
+                if price_increment:
+                    try:
+                        limit_price = float(Decimal(str(limit_price)).quantize(Decimal(str(price_increment)), rounding=ROUND_DOWN))
+                    except Exception:
+                        if currency_pair.startswith('BTC'):
+                            limit_price = round(limit_price, 2)
+                        elif currency_pair.startswith('ETH'):
+                            limit_price = round(limit_price, 2)
+                        else:
+                            limit_price = round(limit_price, 2)
                 else:
-                    limit_price = round(limit_price, 2)  # Default to 2 decimal places for other pairs
+                    if currency_pair.startswith('BTC'):
+                        limit_price = round(limit_price, 2)  # BTC typically uses 2 decimal places for price
+                    elif currency_pair.startswith('ETH'):
+                        limit_price = round(limit_price, 2)  # ETH typically uses 2 decimal places for price
+                    else:
+                        limit_price = round(limit_price, 2)  # Default to 2 decimal places for other pairs
                 
                 print(f"Market price: {market_price}, Limit price: {limit_price}")
                 print(f"Using {limit_price_pct}% discount for limit order")
@@ -158,12 +198,37 @@ class ConnectCoinbase():
                 base_size = amount_quote_currency / limit_price
                 # Format to appropriate decimal places based on typical crypto requirements
                 # Most exchanges require BTC to 8 decimal places, ETH to 6, etc.
-                if currency_pair.startswith('BTC'):
-                    base_size = round(base_size, 8)
-                elif currency_pair.startswith('ETH'):
-                    base_size = round(base_size, 6)
+                if base_increment:
+                    try:
+                        base_size = float(Decimal(str(base_size)).quantize(Decimal(str(base_increment)), rounding=ROUND_DOWN))
+                    except Exception:
+                        if currency_pair.startswith('BTC'):
+                            base_size = round(base_size, 8)
+                        elif currency_pair.startswith('ETH'):
+                            base_size = round(base_size, 6)
+                        else:
+                            base_size = round(base_size, 6)  # Default precision
                 else:
-                    base_size = round(base_size, 6)  # Default precision
+                    if currency_pair.startswith('BTC'):
+                        base_size = round(base_size, 8)
+                    elif currency_pair.startswith('ETH'):
+                        base_size = round(base_size, 6)
+                    else:
+                        base_size = round(base_size, 6)  # Default precision
+
+                # Validate against product minimum sizes if available
+                try:
+                    if quote_min_size and Decimal(str(amount_quote_currency)) < Decimal(str(quote_min_size)):
+                        print(f"Amount {amount_quote_currency} is below quote_min_size {quote_min_size} for {currency_pair}")
+                        return None
+                except Exception:
+                    pass
+                try:
+                    if base_min_size and Decimal(str(base_size)) < Decimal(str(base_min_size)):
+                        print(f"Computed base_size {base_size} is below base_min_size {base_min_size} for {currency_pair}")
+                        return None
+                except Exception:
+                    pass
                 
                 print(f"Buying {base_size} {currency_pair.split('/')[0]} at {limit_price}")
                 
@@ -172,8 +237,9 @@ class ConnectCoinbase():
                 print(f"Order will expire at: {end_time} ({order_timeout_seconds} seconds from now)")
                 
                 # Enable debug logging to see the actual payload sent
-                import logging
-                logging.basicConfig(level=logging.DEBUG)
+                if getattr(self, 'verbose', False):
+                    import logging
+                    logging.basicConfig(level=logging.DEBUG)
                 
                 try:
                     # Try placing a GTD limit order with expiration time
@@ -185,7 +251,7 @@ class ConnectCoinbase():
                         str(base_size),
                         str(limit_price),
                         end_time,
-                        False  # post_only
+                        post_only
                     )
                     print("GTD order placed successfully with expiration")
                 except Exception as e:
@@ -198,7 +264,8 @@ class ConnectCoinbase():
                         product_id=product_id,
                         base_size=str(base_size),
                         limit_price=str(limit_price),
-                        side="BUY"  # Required parameter for limit_order_gtc
+                        side="BUY",  # Required parameter for limit_order_gtc
+                        post_only=post_only
                     )
                 
                 # For limit orders, we can optionally monitor the status
@@ -243,21 +310,47 @@ class ConnectCoinbase():
                 # Extract order details from success_response dictionary
                 if hasattr(order, 'success_response'):
                     success_response = order.success_response
+                    order_id = None
+                    sr_product_id = product_id
                     if isinstance(success_response, dict):
                         # Extract and display order details
-                        order_id = success_response.get('order_id', 'Not available')
-                        product_id = success_response.get('product_id', 'Unknown')
+                        order_id = success_response.get('order_id')
+                        sr_product_id = success_response.get('product_id', sr_product_id)
                         side = success_response.get('side', 'Unknown')
                         client_id = success_response.get('client_order_id', 'Unknown')
                         
-                        print(f"Order ID: {order_id}")
-                        print(f"Product: {product_id}")
+                        print(f"Order ID: {order_id if order_id else 'Not available'}")
+                        print(f"Product: {sr_product_id}")
                         print(f"Side: {side}")
                         print(f"Client Order ID: {client_id}")
-                        
+
+                        # Start fallback-to-market monitor only for limit orders
+                        if order_type.lower() != 'market' and order_id:
+                            self._start_fallback_thread(sr_product_id, order_id, amount_quote_currency, order_timeout_seconds)
+
                         return success_response
                     else:
-                        print("Order successful but details not available in expected format")
+                        # Handle typed success object
+                        order_id = getattr(success_response, 'order_id', None)
+                        sr_product_id = getattr(success_response, 'product_id', sr_product_id)
+                        side = getattr(success_response, 'side', 'Unknown')
+                        client_id = getattr(success_response, 'client_order_id', 'Unknown')
+
+                        print(f"Order ID: {order_id if order_id else 'Not available'}")
+                        print(f"Product: {sr_product_id}")
+                        print(f"Side: {side}")
+                        print(f"Client Order ID: {client_id}")
+
+                        if order_type.lower() != 'market' and order_id:
+                            self._start_fallback_thread(sr_product_id, order_id, amount_quote_currency, order_timeout_seconds)
+                        
+                        # Return a basic dict for consistency
+                        return {
+                            'order_id': order_id,
+                            'product_id': sr_product_id,
+                            'side': side,
+                            'client_order_id': client_id
+                        }
                 else:
                     print("Order successful but no details available")
                 
@@ -270,6 +363,101 @@ class ConnectCoinbase():
         except Exception as e:
             print(f'Failed to create order: {e}')
             return None
+
+    def _start_fallback_thread(self, product_id, order_id, original_quote_amount, timeout_seconds):
+        """Spawn a background thread to enforce fallback-to-market after timeout."""
+        t = threading.Thread(target=self._fallback_worker, args=(product_id, order_id, original_quote_amount, timeout_seconds), daemon=True)
+        t.start()
+
+    def _fallback_worker(self, product_id, order_id, original_quote_amount, timeout_seconds):
+        try:
+            # Sleep until after the GTD expiry window (or chosen timeout for GTC fallback)
+            time.sleep(max(1, int(timeout_seconds)) + 2)
+
+            # Fetch order status
+            order_resp = self.client.get_order(order_id)
+            order_obj = getattr(order_resp, 'order', None)
+
+            # Extract fields resiliently (typed or dict)
+            status = None
+            filled_value = 0.0
+            filled_size = 0.0
+            avg_price = None
+
+            if isinstance(order_obj, dict):
+                status = order_obj.get('status')
+                fv = order_obj.get('filled_value')
+                fs = order_obj.get('filled_size')
+                ap = order_obj.get('average_filled_price')
+            else:
+                status = getattr(order_obj, 'status', None)
+                fv = getattr(order_obj, 'filled_value', None)
+                fs = getattr(order_obj, 'filled_size', None)
+                ap = getattr(order_obj, 'average_filled_price', None)
+
+            try:
+                filled_value = float(fv) if fv is not None else 0.0
+            except Exception:
+                filled_value = 0.0
+            try:
+                filled_size = float(fs) if fs is not None else 0.0
+            except Exception:
+                filled_size = 0.0
+            try:
+                avg_price = float(ap) if ap is not None else None
+            except Exception:
+                avg_price = None
+
+            # If no filled_value but have size and avg price, derive
+            if filled_value == 0.0 and filled_size and avg_price:
+                filled_value = filled_size * avg_price
+
+            remaining_quote = float(original_quote_amount) - filled_value
+            if remaining_quote <= 0:
+                print(f"Fallback: Nothing remaining to buy for order {order_id}; status={status}")
+                return
+
+            # Attempt to cancel any remaining order (safe if already expired/cancelled)
+            try:
+                self.client.cancel_orders([order_id])
+                print(f"Fallback: Cancel request sent for order {order_id}")
+            except Exception as e:
+                print(f"Fallback: Cancel failed or not needed for {order_id}: {e}")
+
+            # Round remaining quote by quote_increment and ensure >= quote_min_size
+            try:
+                product = self.client.get_product(product_id)
+                quote_increment = getattr(product, 'quote_increment', None)
+                quote_min_size = getattr(product, 'quote_min_size', None)
+
+                if quote_increment:
+                    try:
+                        remaining_quote = float(Decimal(str(remaining_quote)).quantize(Decimal(str(quote_increment)), rounding=ROUND_DOWN))
+                    except Exception:
+                        # Fallback to 2 decimals for quote rounding
+                        remaining_quote = round(remaining_quote, 2)
+                else:
+                    remaining_quote = round(remaining_quote, 2)
+
+                if quote_min_size and Decimal(str(remaining_quote)) < Decimal(str(quote_min_size)):
+                    print(f"Fallback: Remaining {remaining_quote} below quote_min_size {quote_min_size} for {product_id}; skipping market buy.")
+                    return
+            except Exception as e:
+                print(f"Fallback: Failed to prepare remaining quote rounding/min check: {e}")
+
+            # Place market order for the remaining amount
+            try:
+                client_order_id = str(uuid.uuid4())
+                mo = self.client.market_order_buy(
+                    client_order_id=client_order_id,
+                    product_id=product_id,
+                    quote_size=str(remaining_quote)
+                )
+                print(f"Fallback: Placed market buy for remaining {remaining_quote} {product_id} (order_id={order_id})")
+            except Exception as e:
+                print(f"Fallback: Failed to place market buy for remaining amount: {e}")
+        except Exception as e:
+            print(f"Fallback worker error: {e}")
 
 
 if __name__ == '__main__':

@@ -9,7 +9,8 @@
         "quote_currency_amount": 250,
         "order_type": "limit",
         "limit_price_pct": 0.01,
-        "order_timeout_seconds": 43200
+        "post_only": true,
+        "order_timeout_seconds": 600
     },
     {
         "frequency": "weekly",
@@ -21,7 +22,8 @@
         "quote_currency_amount": 5.00,
         "order_type": "limit",
         "limit_price_pct": 0.01,
-        "order_timeout_seconds": 43200
+        "post_only": true,
+        "order_timeout_seconds": 600
     },
     {
         "frequency": "weekly",
@@ -33,7 +35,8 @@
         "quote_currency_amount": 10.00,
         "order_type": "limit",
         "limit_price_pct": 0.01,
-        "order_timeout_seconds": 43200
+        "post_only": true,
+        "order_timeout_seconds": 600
     },
     {
         "frequency": "weekly",
@@ -45,6 +48,7 @@
         "quote_currency_amount": 4.00,
         "order_type": "limit",
         "limit_price_pct": 0.01,
-        "order_timeout_seconds": 43200
+        "post_only": true,
+        "order_timeout_seconds": 600
     }
 ]

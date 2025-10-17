@@ -1,5 +1,5 @@
 schedule.json*
-test_json.json
+schedule-test.json*
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
