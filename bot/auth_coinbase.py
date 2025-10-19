@@ -62,6 +62,7 @@ class ConnectCoinbase():
     REPRICE_WAIT_MAX = 10
     REPRICE_WAIT_MIN = 3
     REPRICE_POLL_SLEEP = 0.3
+    REPRICE_MAX_ITERATIONS = 1000
 
     def __init__(self):
         """Initialize the Coinbase connection using API keys from environment variables."""
@@ -507,10 +508,8 @@ class ConnectCoinbase():
                     if order2 is not None:
                         if hasattr(order2, 'success') and order2.success:
                             logger.info(f"Adjusted post-only price down one tick to {adjusted_price} and retried successfully")
-                            order = order2
-                        else:
-                            order = order2
-                            error_code, err_text = self._extract_error_info(order2)
+                        # In both cases, adopt the retry result and let unified error handling below decide
+                        order = order2
 
                 if not (hasattr(order, 'success') and order.success):
                     error_code, error_msg = self._extract_error_info(order)
@@ -769,7 +768,9 @@ class ConnectCoinbase():
             current_order_id = order_id
             status = None
             first_cycle = True
-            while time.time() < deadline:
+            max_iterations = getattr(config, 'max_reprice_iterations', self.REPRICE_MAX_ITERATIONS)
+            iteration_count = 0
+            while time.time() < deadline and iteration_count < max_iterations:
                 # Initial wait before first cancel to give the fresh order a chance to rest
                 if first_cycle:
                     # Ensure at least 1s sleep so a fresh post-only limit can rest
@@ -813,7 +814,7 @@ class ConnectCoinbase():
 
                 try:
                     term = self.TERMINAL_STATUSES
-                    wait_deadline = time.time() + min(self.REPRICE_WAIT_MAX, max(self.REPRICE_WAIT_MIN, int(config.reprice_interval_seconds)))
+                    wait_deadline = time.time() + max(self.REPRICE_WAIT_MIN, min(self.REPRICE_WAIT_MAX, int(config.reprice_interval_seconds)))
                     latest_filled_value = Decimal(str(original_quote_amount)) - remaining_quote
                     latest_status = status
                     while time.time() < wait_deadline:
@@ -935,6 +936,9 @@ class ConnectCoinbase():
 
                 except Exception as e:
                     logger.warning(f"Reprice: Failed to reprice {product_id}: {e}")
+                
+                # advance iteration guard
+                iteration_count += 1
 
             try:
                 ord_resp = self.client.get_order(current_order_id)
