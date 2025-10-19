@@ -499,50 +499,20 @@ class ConnectCoinbase():
                     'error': None
                 }
             else:
-                # If post-only was rejected due to crossing, nudge price down one tick and retry once
-                err_text = ''
-                try:
-                    err_text = str(order.error_response) if hasattr(order, 'error_response') else str(order)
-                except Exception:
-                    err_text = 'Unknown error'
-                if 'INVALID_LIMIT_PRICE_POST_ONLY' in err_text or 'POST_ONLY' in err_text:
-                    try:
-                        pi = product_info  # already fetched above
-                        tick = pi.get('price_increment')
-                        if tick:
-                            adjusted_price = (Decimal(str(limit_price)) - Decimal(str(tick)))
-                            adjusted_price = quantize_or_round(adjusted_price, pi['price_increment'], 2)
-                            logger.info(f"Adjusting post-only price down one tick to {adjusted_price} and retrying")
-                            try:
-                                order2 = self.client.limit_order_gtd(
-                                    client_order_id=str(uuid.uuid4()),
-                                    product_id=product_id,
-                                    side="BUY",
-                                    base_size=str(base_size),
-                                    limit_price=str(adjusted_price),
-                                    end_time=end_time,
-                                    post_only=post_only
-                                )
-                            except Exception:
-                                order2 = self.client.limit_order_gtc(
-                                    client_order_id=str(uuid.uuid4()),
-                                    product_id=product_id,
-                                    base_size=str(base_size),
-                                    limit_price=str(adjusted_price),
-                                    side="BUY",
-                                    post_only=post_only
-                                )
-                            if hasattr(order2, 'success') and order2.success:
-                                order = order2
-                            else:
-                                # fall through to error handling with the new error
-                                order = order2
-                                err_text = str(getattr(order2, 'error_response', err_text))
-                    except Exception:
-                        pass
+                # If post-only was rejected due to crossing, nudge price down one tick and retry once using helpers
+                error_code, err_text = self._extract_error_info(order)
+                if (error_code == 'INVALID_LIMIT_PRICE_POST_ONLY') or (error_code is None and ('INVALID_LIMIT_PRICE_POST_ONLY' in err_text or 'POST_ONLY' in err_text)):
+                    order2, adjusted_price = self._retry_post_only_with_nudge(product_id, base_size, limit_price, end_time, post_only, product_info)
+                    if order2 is not None:
+                        if hasattr(order2, 'success') and order2.success:
+                            logger.info(f"Adjusted post-only price down one tick to {adjusted_price} and retried successfully")
+                            order = order2
+                        else:
+                            order = order2
+                            error_code, err_text = self._extract_error_info(order2)
 
                 if not (hasattr(order, 'success') and order.success):
-                    error_msg = getattr(order, 'error_response', 'Unknown error')
+                    error_code, error_msg = self._extract_error_info(order)
                     logger.error(f"Failed to create order: {error_msg}")
                     return {
                         'success': False,
@@ -604,6 +574,54 @@ class ConnectCoinbase():
             reprice_duration_seconds=rd,
             timeout_seconds=base_timeout,
         )
+
+    def _extract_error_info(self, resp):
+        error_code = None
+        error_text = 'Unknown error'
+        try:
+            if hasattr(resp, 'error_response'):
+                err_resp = resp.error_response
+                if isinstance(err_resp, dict):
+                    error_code = err_resp.get('error') or err_resp.get('code')
+                    error_text = str(err_resp)
+                else:
+                    error_code = getattr(err_resp, 'error', None) or getattr(err_resp, 'code', None)
+                    error_text = str(err_resp)
+            elif isinstance(resp, dict):
+                error_code = resp.get('error') or resp.get('code')
+                error_text = str(resp)
+            else:
+                error_text = str(resp)
+        except Exception:
+            pass
+        return error_code, error_text
+
+    def _retry_post_only_with_nudge(self, product_id, base_size, price, end_time, post_only, product_info):
+        tick = product_info.get('price_increment')
+        if not tick:
+            return None, None
+        lp2 = (Decimal(str(price)) - Decimal(str(tick)))
+        lp2 = quantize_or_round(lp2, product_info['price_increment'], 2)
+        try:
+            order2 = self.client.limit_order_gtd(
+                client_order_id=str(uuid.uuid4()),
+                product_id=product_id,
+                side="BUY",
+                base_size=str(base_size),
+                limit_price=str(lp2),
+                end_time=end_time,
+                post_only=post_only
+            )
+        except Exception:
+            order2 = self.client.limit_order_gtc(
+                client_order_id=str(uuid.uuid4()),
+                product_id=product_id,
+                base_size=str(base_size),
+                limit_price=str(lp2),
+                side="BUY",
+                post_only=post_only
+            )
+        return order2, lp2
 
     def _fallback_worker(self, product_id, order_id, original_quote_amount, timeout_seconds):
         try:
@@ -922,7 +940,11 @@ class ConnectCoinbase():
                                             new_id = getattr(sr2, 'order_id', None)
                         if new_id:
                             current_order_id = new_id
-                        logger.info(f"Reprice: Placed refreshed limit {product_id} at {lp} for remaining {remaining_quote}")
+                            logger.info(f"Reprice: Placed refreshed limit {product_id} at {lp} for remaining {remaining_quote}")
+                        else:
+                            # Prefer structured code when available; fall back to error text
+                            err_code, err_text = self._extract_error_info(new_order)
+                            logger.warning(f"Reprice: Refresh failed (code={err_code}): {err_text}")
                     except Exception:
                         pass
 
