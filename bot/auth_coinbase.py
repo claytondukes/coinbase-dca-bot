@@ -430,8 +430,12 @@ class ConnectCoinbase():
                                 limit_price_pct=limit_price_pct,
                                 post_only=post_only,
                                 reprice_interval_seconds=int(reprice_interval_seconds) if reprice_interval_seconds is not None else 0,
-                                reprice_duration_seconds=int(reprice_duration_seconds) if reprice_duration_seconds is not None else int(order_timeout_seconds),
-                                timeout_seconds=int(order_timeout_seconds)
+                                reprice_duration_seconds=(
+                                    int(reprice_duration_seconds) if reprice_duration_seconds is not None
+                                    else int(order_timeout_seconds) if order_timeout_seconds is not None
+                                    else 600
+                                ),
+                                timeout_seconds=int(order_timeout_seconds) if order_timeout_seconds is not None else 600
                             )
                             self._start_reprice_or_fallback_thread(
                                 sr_product_id,
@@ -461,15 +465,22 @@ class ConnectCoinbase():
                         logger.info(f"Client Order ID: {client_id}")
 
                         if order_type.lower() != 'market' and order_id:
+                            cfg = RepriceConfig(
+                                limit_price_pct=limit_price_pct,
+                                post_only=post_only,
+                                reprice_interval_seconds=int(reprice_interval_seconds) if reprice_interval_seconds is not None else 0,
+                                reprice_duration_seconds=(
+                                    int(reprice_duration_seconds) if reprice_duration_seconds is not None
+                                    else int(order_timeout_seconds) if order_timeout_seconds is not None
+                                    else 600
+                                ),
+                                timeout_seconds=int(order_timeout_seconds) if order_timeout_seconds is not None else 600
+                            )
                             self._start_reprice_or_fallback_thread(
                                 sr_product_id,
                                 order_id,
                                 amount_quote_currency,
-                                order_timeout_seconds,
-                                limit_price_pct,
-                                post_only,
-                                reprice_interval_seconds,
-                                reprice_duration_seconds
+                                cfg
                             )
                         
                         # Return a basic dict for consistency
