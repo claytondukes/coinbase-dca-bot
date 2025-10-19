@@ -58,6 +58,9 @@ class ConnectCoinbase():
     """
 
     TERMINAL_STATUSES = {"CANCELLED", "EXPIRED", "FILLED", "REJECTED", "FAILED"}
+    DEFAULT_TIMEOUT_SECONDS = 600
+    REPRICE_WAIT_MAX = 10
+    REPRICE_WAIT_MIN = 3
 
     def __init__(self):
         """Initialize the Coinbase connection using API keys from environment variables."""
@@ -353,7 +356,6 @@ class ConnectCoinbase():
                         end_time=end_time,
                         post_only=post_only
                     )
-                    logger.info("GTD order placed successfully with expiration")
                 except Exception as e:
                     logger.warning(f"GTD order failed: {e}")
                     logger.info("Falling back to GTC order without expiration")
@@ -426,22 +428,15 @@ class ConnectCoinbase():
 
                         # Start fallback-to-market monitor only for limit orders
                         if order_type.lower() != 'market' and order_id:
-                            cfg = RepriceConfig(
-                                limit_price_pct=limit_price_pct,
-                                post_only=post_only,
-                                reprice_interval_seconds=int(reprice_interval_seconds) if reprice_interval_seconds is not None else 0,
-                                reprice_duration_seconds=(
-                                    int(reprice_duration_seconds) if reprice_duration_seconds is not None
-                                    else int(order_timeout_seconds) if order_timeout_seconds is not None
-                                    else 600
-                                ),
-                                timeout_seconds=int(order_timeout_seconds) if order_timeout_seconds is not None else 600
+                            cfg = self._build_reprice_config(
+                                limit_price_pct,
+                                post_only,
+                                reprice_interval_seconds,
+                                reprice_duration_seconds,
+                                order_timeout_seconds,
                             )
                             self._start_reprice_or_fallback_thread(
-                                sr_product_id,
-                                order_id,
-                                amount_quote_currency,
-                                cfg
+                                sr_product_id, order_id, amount_quote_currency, cfg
                             )
 
                         return {
@@ -504,16 +499,59 @@ class ConnectCoinbase():
                     'error': None
                 }
             else:
-                error_msg = order.error_response if hasattr(order, 'error_response') else 'Unknown error'
-                logger.error(f"Failed to create order: {error_msg}")
-                return {
-                    'success': False,
-                    'order_id': None,
-                    'product_id': product_id,
-                    'side': 'BUY',
-                    'client_order_id': client_order_id,
-                    'error': str(error_msg)
-                }
+                # If post-only was rejected due to crossing, nudge price down one tick and retry once
+                err_text = ''
+                try:
+                    err_text = str(order.error_response) if hasattr(order, 'error_response') else str(order)
+                except Exception:
+                    err_text = 'Unknown error'
+                if 'INVALID_LIMIT_PRICE_POST_ONLY' in err_text or 'POST_ONLY' in err_text:
+                    try:
+                        pi = product_info  # already fetched above
+                        tick = pi.get('price_increment')
+                        if tick:
+                            adjusted_price = (Decimal(str(limit_price)) - Decimal(str(tick)))
+                            adjusted_price = quantize_or_round(adjusted_price, pi['price_increment'], 2)
+                            logger.info(f"Adjusting post-only price down one tick to {adjusted_price} and retrying")
+                            try:
+                                order2 = self.client.limit_order_gtd(
+                                    client_order_id=str(uuid.uuid4()),
+                                    product_id=product_id,
+                                    side="BUY",
+                                    base_size=str(base_size),
+                                    limit_price=str(adjusted_price),
+                                    end_time=end_time,
+                                    post_only=post_only
+                                )
+                            except Exception:
+                                order2 = self.client.limit_order_gtc(
+                                    client_order_id=str(uuid.uuid4()),
+                                    product_id=product_id,
+                                    base_size=str(base_size),
+                                    limit_price=str(adjusted_price),
+                                    side="BUY",
+                                    post_only=post_only
+                                )
+                            if hasattr(order2, 'success') and order2.success:
+                                order = order2
+                            else:
+                                # fall through to error handling with the new error
+                                order = order2
+                                err_text = str(getattr(order2, 'error_response', err_text))
+                    except Exception:
+                        pass
+
+                if not (hasattr(order, 'success') and order.success):
+                    error_msg = getattr(order, 'error_response', 'Unknown error')
+                    logger.error(f"Failed to create order: {error_msg}")
+                    return {
+                        'success': False,
+                        'order_id': None,
+                        'product_id': product_id,
+                        'side': 'BUY',
+                        'client_order_id': client_order_id,
+                        'error': str(error_msg)
+                    }
                 
         except Exception as e:
             logger.error(f'Failed to create order: {e}')
@@ -545,6 +583,27 @@ class ConnectCoinbase():
             t.start()
         else:
             self._start_fallback_thread(product_id, order_id, original_quote_amount, config.timeout_seconds)
+
+    def _build_reprice_config(self, limit_price_pct, post_only, reprice_interval_seconds, reprice_duration_seconds, order_timeout_seconds) -> RepriceConfig:
+        try:
+            ri = int(reprice_interval_seconds) if reprice_interval_seconds is not None else 0
+        except Exception:
+            ri = 0
+        try:
+            base_timeout = int(order_timeout_seconds) if order_timeout_seconds is not None else self.DEFAULT_TIMEOUT_SECONDS
+        except Exception:
+            base_timeout = self.DEFAULT_TIMEOUT_SECONDS
+        try:
+            rd = int(reprice_duration_seconds) if reprice_duration_seconds is not None else base_timeout
+        except Exception:
+            rd = base_timeout
+        return RepriceConfig(
+            limit_price_pct=limit_price_pct,
+            post_only=post_only,
+            reprice_interval_seconds=ri,
+            reprice_duration_seconds=rd,
+            timeout_seconds=base_timeout,
+        )
 
     def _fallback_worker(self, product_id, order_id, original_quote_amount, timeout_seconds):
         try:
@@ -683,10 +742,21 @@ class ConnectCoinbase():
     def _reprice_and_fallback_worker(self, product_id, order_id, original_quote_amount, config: RepriceConfig):
         try:
             currency_pair = product_id.replace('-', '/')
-            deadline = time.time() + max(1, int(config.reprice_duration_seconds) if config.reprice_duration_seconds else int(config.timeout_seconds))
+            if config.reprice_duration_seconds:
+                duration_seconds = int(config.reprice_duration_seconds)
+            else:
+                duration_seconds = int(config.timeout_seconds)
+            deadline = time.time() + max(1, duration_seconds)
             current_order_id = order_id
             status = None
+            first_cycle = True
             while time.time() < deadline:
+                # Initial wait before first cancel to give the fresh order a chance to rest
+                if first_cycle:
+                    initial_sleep = min(int(config.reprice_interval_seconds or 0), max(0, int(deadline - time.time())))
+                    if initial_sleep > 0:
+                        time.sleep(initial_sleep)
+                    first_cycle = False
                 try:
                     ord_resp = self.client.get_order(current_order_id)
                     ord_obj = getattr(ord_resp, 'order', None)
@@ -723,7 +793,7 @@ class ConnectCoinbase():
 
                 try:
                     term = self.TERMINAL_STATUSES
-                    wait_deadline = time.time() + min(10, max(3, int(config.reprice_interval_seconds)))
+                    wait_deadline = time.time() + min(self.REPRICE_WAIT_MAX, max(self.REPRICE_WAIT_MIN, int(config.reprice_interval_seconds)))
                     latest_filled_value = float(Decimal(str(original_quote_amount)) - remaining_quote)
                     latest_status = status
                     while time.time() < wait_deadline:
@@ -813,18 +883,56 @@ class ConnectCoinbase():
                                 new_id = getattr(sr, 'order_id', None)
                         elif isinstance(new_order, dict):
                             new_id = new_order.get('order_id')
+
+                        # If post-only invalid, nudge price down one tick and try once
+                        if not new_id:
+                            try:
+                                err_text = str(getattr(new_order, 'error_response', new_order))
+                            except Exception:
+                                err_text = ''
+                            if 'INVALID_LIMIT_PRICE_POST_ONLY' in err_text or 'POST_ONLY' in err_text:
+                                tick = pi.get('price_increment')
+                                if tick:
+                                    lp2 = (Decimal(str(lp)) - Decimal(str(tick)))
+                                    lp2 = quantize_or_round(lp2, pi['price_increment'], 2)
+                                    try:
+                                        new_order2 = self.client.limit_order_gtd(
+                                            client_order_id=str(uuid.uuid4()),
+                                            product_id=product_id,
+                                            side="BUY",
+                                            base_size=str(bs),
+                                            limit_price=str(lp2),
+                                            end_time=end_time,
+                                            post_only=config.post_only
+                                        )
+                                    except Exception:
+                                        new_order2 = self.client.limit_order_gtc(
+                                            client_order_id=str(uuid.uuid4()),
+                                            product_id=product_id,
+                                            base_size=str(bs),
+                                            limit_price=str(lp2),
+                                            side="BUY",
+                                            post_only=config.post_only
+                                        )
+                                    if hasattr(new_order2, 'success') and new_order2.success:
+                                        sr2 = getattr(new_order2, 'success_response', None)
+                                        if isinstance(sr2, dict):
+                                            new_id = sr2.get('order_id')
+                                        else:
+                                            new_id = getattr(sr2, 'order_id', None)
                         if new_id:
                             current_order_id = new_id
                         logger.info(f"Reprice: Placed refreshed limit {product_id} at {lp} for remaining {remaining_quote}")
                     except Exception:
                         pass
+
+                    sleep_left = deadline - time.time()
+                    if sleep_left <= 0:
+                        break
+                    time.sleep(min(int(config.reprice_interval_seconds), int(sleep_left)))
+
                 except Exception as e:
                     logger.warning(f"Reprice: Failed to reprice {product_id}: {e}")
-
-                sleep_left = deadline - time.time()
-                if sleep_left <= 0:
-                    break
-                time.sleep(min(int(config.reprice_interval_seconds), int(sleep_left)))
 
             try:
                 ord_resp = self.client.get_order(current_order_id)
@@ -861,7 +969,7 @@ class ConnectCoinbase():
 
             try:
                 term = self.TERMINAL_STATUSES
-                wait_deadline = time.time() + 10
+                wait_deadline = time.time() + self.REPRICE_WAIT_MAX
                 latest_filled_value = float(Decimal(str(original_quote_amount)) - remaining_quote)
                 latest_status = status
                 while time.time() < wait_deadline:
