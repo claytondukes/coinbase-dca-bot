@@ -174,6 +174,9 @@ TZ=America/New_York
 # Verbose SDK logging (optional). Accepted truthy values:
 # 1, true, yes, on, debug (case-insensitive)
 COINBASE_VERBOSE=false
+
+# Schedule file path (optional). Defaults to schedule.json
+SCHEDULE_FILE=schedule.json
 ```
 
 ## Maker-first with quick fallback
@@ -199,6 +202,34 @@ Example schedule entry (maker-first):
 }
 ```
 
+## Maker repricing before fallback (optional)
+
+- To improve the chance of maker fills while price moves, enable periodic
+  repricing. During a configurable duration, the bot cancels and reposts a
+  post-only limit every interval at the current market price minus
+  `limit_price_pct`. If the order still is not filled by the end of the
+  duration, the bot performs the same safe fallback described above.
+- Configure per schedule entry with two optional fields:
+  - `reprice_interval_seconds`: how often to reprice (e.g., 60).
+  - `reprice_duration_seconds`: how long to keep repricing before fallback.
+
+Example schedule entry with repricing:
+
+```json
+{
+  "frequency": "daily",
+  "time": "15:45",
+  "currency_pair": "BTC/USDC",
+  "quote_currency_amount": 20,
+  "order_type": "limit",
+  "limit_price_pct": 0.10,
+  "post_only": true,
+  "order_timeout_seconds": 1800,
+  "reprice_interval_seconds": 60,
+  "reprice_duration_seconds": 1800
+}
+```
+
 ## Timezone behavior
 
 - The scheduler interprets `time` in the process timezone.
@@ -209,7 +240,7 @@ Example schedule entry (maker-first):
 
 ## Schedule files
 
-- The bot loads `schedule.json` by default in `main.py`.
-- Keep your full plan in `schedule-full.json` if desired, then copy to
-  `schedule.json` for deployment, or change the loader in `main.py` to point to
-  your preferred file.
+- The bot loads `schedule.json` by default, or the path provided via the
+  `SCHEDULE_FILE` environment variable.
+- Keep a full plan in another file (for example, `schedule-full.json`) and set
+  `SCHEDULE_FILE` accordingly for deployment.
