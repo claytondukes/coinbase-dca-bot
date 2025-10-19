@@ -9,7 +9,9 @@
         "order_type": "limit",
         "limit_price_pct": 0.01,
         "post_only": true,
-        "order_timeout_seconds": 600
+        "order_timeout_seconds": 600,
+        "reprice_interval_seconds": 60,
+        "reprice_duration_seconds": 600
     },
     {
         "frequency": "weekly",
@@ -21,7 +23,9 @@
         "order_type": "limit",
         "limit_price_pct": 0.01,
         "post_only": true,
-        "order_timeout_seconds": 600
+        "order_timeout_seconds": 600,
+        "reprice_interval_seconds": 60,
+        "reprice_duration_seconds": 600
     },
     {
         "frequency": "weekly",
@@ -33,7 +37,9 @@
         "order_type": "limit",
         "limit_price_pct": 0.01,
         "post_only": true,
-        "order_timeout_seconds": 600
+        "order_timeout_seconds": 600,
+        "reprice_interval_seconds": 60,
+        "reprice_duration_seconds": 600
     },
     {
         "frequency": "weekly",
@@ -45,6 +51,8 @@
         "order_type": "limit",
         "limit_price_pct": 0.01,
         "post_only": true,
-        "order_timeout_seconds": 600
+        "order_timeout_seconds": 600,
+        "reprice_interval_seconds": 60,
+        "reprice_duration_seconds": 600
     }
 ]

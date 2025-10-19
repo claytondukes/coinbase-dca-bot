@@ -147,7 +147,7 @@ class ConnectCoinbase():
             logger.error(f"Failed to get product information: {e}")
             return None
 
-    def create_order(self, currency_pair, amount_quote_currency, client_order_id=None, order_type="limit", limit_price_pct=0.01, order_timeout_seconds=600, post_only=True, max_retries=3):
+    def create_order(self, currency_pair, amount_quote_currency, client_order_id=None, order_type="limit", limit_price_pct=0.01, order_timeout_seconds=600, post_only=True, max_retries=3, reprice_interval_seconds=None, reprice_duration_seconds=None):
         """
         Create a buy order for cryptocurrency using quote currency amount.
         
@@ -408,7 +408,16 @@ class ConnectCoinbase():
 
                         # Start fallback-to-market monitor only for limit orders
                         if order_type.lower() != 'market' and order_id:
-                            self._start_fallback_thread(sr_product_id, order_id, amount_quote_currency, order_timeout_seconds)
+                            self._start_reprice_or_fallback_thread(
+                                sr_product_id,
+                                order_id,
+                                amount_quote_currency,
+                                order_timeout_seconds,
+                                limit_price_pct,
+                                post_only,
+                                reprice_interval_seconds,
+                                reprice_duration_seconds
+                            )
 
                         return {
                             'success': True,
@@ -431,7 +440,16 @@ class ConnectCoinbase():
                         logger.info(f"Client Order ID: {client_id}")
 
                         if order_type.lower() != 'market' and order_id:
-                            self._start_fallback_thread(sr_product_id, order_id, amount_quote_currency, order_timeout_seconds)
+                            self._start_reprice_or_fallback_thread(
+                                sr_product_id,
+                                order_id,
+                                amount_quote_currency,
+                                order_timeout_seconds,
+                                limit_price_pct,
+                                post_only,
+                                reprice_interval_seconds,
+                                reprice_duration_seconds
+                            )
                         
                         # Return a basic dict for consistency
                         return {
@@ -480,6 +498,22 @@ class ConnectCoinbase():
         """Spawn a background thread to enforce fallback-to-market after timeout."""
         t = threading.Thread(target=self._fallback_worker, args=(product_id, order_id, original_quote_amount, timeout_seconds), daemon=True)
         t.start()
+
+    def _start_reprice_or_fallback_thread(self, product_id, order_id, original_quote_amount, timeout_seconds, limit_price_pct, post_only, reprice_interval_seconds, reprice_duration_seconds):
+        try:
+            ri = int(reprice_interval_seconds) if reprice_interval_seconds is not None else 0
+        except Exception:
+            ri = 0
+        if ri > 0:
+            rd = int(reprice_duration_seconds) if reprice_duration_seconds is not None else int(timeout_seconds)
+            t = threading.Thread(
+                target=self._reprice_and_fallback_worker,
+                args=(product_id, order_id, original_quote_amount, int(timeout_seconds), limit_price_pct, bool(post_only), ri, rd),
+                daemon=True,
+            )
+            t.start()
+        else:
+            self._start_fallback_thread(product_id, order_id, original_quote_amount, timeout_seconds)
 
     def _fallback_worker(self, product_id, order_id, original_quote_amount, timeout_seconds):
         try:
@@ -632,6 +666,297 @@ class ConnectCoinbase():
                 logger.error(f"Fallback: Failed to place market buy for remaining amount: {e}")
         except Exception as e:
             logger.error(f"Fallback worker error: {e}")
+
+    def _reprice_and_fallback_worker(self, product_id, order_id, original_quote_amount, timeout_seconds, limit_price_pct, post_only, reprice_interval_seconds, reprice_duration_seconds):
+        try:
+            currency_pair = product_id.replace('-', '/')
+            deadline = time.time() + max(1, int(reprice_duration_seconds) if reprice_duration_seconds else int(timeout_seconds))
+            current_order_id = order_id
+            while time.time() < deadline:
+                try:
+                    ord_resp = self.client.get_order(current_order_id)
+                    ord_obj = getattr(ord_resp, 'order', None)
+                    if ord_obj is None and isinstance(ord_resp, dict):
+                        ord_obj = ord_resp.get('order', ord_resp)
+                    if isinstance(ord_obj, dict):
+                        status = ord_obj.get('status')
+                        fv = ord_obj.get('filled_value')
+                        fs = ord_obj.get('filled_size')
+                        ap = ord_obj.get('average_filled_price')
+                    else:
+                        status = getattr(ord_obj, 'status', None)
+                        fv = getattr(ord_obj, 'filled_value', None)
+                        fs = getattr(ord_obj, 'filled_size', None)
+                        ap = getattr(ord_obj, 'average_filled_price', None)
+                    try:
+                        filled_value = float(fv) if fv is not None else 0.0
+                    except Exception:
+                        filled_value = 0.0
+                    try:
+                        fs_f = float(fs) if fs is not None else 0.0
+                    except Exception:
+                        fs_f = 0.0
+                    try:
+                        ap_f = float(ap) if ap is not None else None
+                    except Exception:
+                        ap_f = None
+                    if filled_value == 0.0 and fs_f and ap_f:
+                        filled_value = fs_f * ap_f
+                    remaining_quote = Decimal(str(original_quote_amount)) - Decimal(str(filled_value))
+                    if remaining_quote <= Decimal('0'):
+                        logger.info(f"Reprice: Nothing remaining to buy for order {current_order_id}; status={status}")
+                        return
+                except Exception:
+                    status = None
+                    remaining_quote = Decimal(str(original_quote_amount))
+
+                try:
+                    self.client.cancel_orders([current_order_id])
+                    logger.info(f"Reprice: Cancel request sent for order {current_order_id}")
+                except Exception as e:
+                    logger.warning(f"Reprice: Cancel failed or not needed for {current_order_id}: {e}")
+
+                try:
+                    term = {"CANCELLED", "EXPIRED", "FILLED", "REJECTED", "FAILED"}
+                    wait_deadline = time.time() + min(10, max(3, int(reprice_interval_seconds)))
+                    latest_filled_value = float(Decimal(str(original_quote_amount)) - remaining_quote)
+                    latest_status = status
+                    while time.time() < wait_deadline:
+                        try:
+                            ord_resp2 = self.client.get_order(current_order_id)
+                            ord_obj2 = getattr(ord_resp2, 'order', None)
+                            if ord_obj2 is None and isinstance(ord_resp2, dict):
+                                ord_obj2 = ord_resp2.get('order', ord_resp2)
+                            if isinstance(ord_obj2, dict):
+                                latest_status = ord_obj2.get('status')
+                                fv2 = ord_obj2.get('filled_value')
+                                fs2 = ord_obj2.get('filled_size')
+                                ap2 = ord_obj2.get('average_filled_price')
+                            else:
+                                latest_status = getattr(ord_obj2, 'status', None)
+                                fv2 = getattr(ord_obj2, 'filled_value', None)
+                                fs2 = getattr(ord_obj2, 'filled_size', None)
+                                ap2 = getattr(ord_obj2, 'average_filled_price', None)
+                            try:
+                                latest_filled_value = float(fv2) if fv2 is not None else 0.0
+                            except Exception:
+                                latest_filled_value = 0.0
+                            try:
+                                fs2f = float(fs2) if fs2 is not None else 0.0
+                            except Exception:
+                                fs2f = 0.0
+                            try:
+                                ap2f = float(ap2) if ap2 is not None else None
+                            except Exception:
+                                ap2f = None
+                            if latest_filled_value == 0.0 and fs2f and ap2f:
+                                latest_filled_value = fs2f * ap2f
+                            if latest_status in term:
+                                break
+                        except Exception:
+                            pass
+                        time.sleep(0.3)
+                    remaining_quote = Decimal(str(original_quote_amount)) - Decimal(str(latest_filled_value))
+                    if remaining_quote <= Decimal('0'):
+                        logger.info(f"Reprice: Nothing remaining to buy after cancel for order {current_order_id}; status={latest_status}")
+                        return
+                except Exception:
+                    pass
+
+                pi = self.get_product_info(currency_pair)
+                if not pi:
+                    logger.warning(f"Reprice: Could not get product info for {currency_pair}")
+                    break
+                try:
+                    mp = Decimal(str(pi['price']))
+                    pct = Decimal(str(limit_price_pct)) / Decimal('100')
+                    lp = mp * (Decimal('1') - pct)
+                    lp = quantize_or_round(lp, pi['price_increment'], 2)
+                    bs = (Decimal(str(remaining_quote)) / Decimal(str(lp)))
+                    bs = quantize_or_round(bs, pi['base_increment'], 8)
+                    if pi['base_min_size'] and bs < Decimal(str(pi['base_min_size'])):
+                        logger.info(f"Reprice: Base size {bs} below base_min_size {pi['base_min_size']}")
+                        return
+                    try:
+                        mqs = pi.get('quote_min_size')
+                        if mqs is not None:
+                            notional = (Decimal(str(bs)) * Decimal(str(lp)))
+                            if notional < Decimal(str(mqs)):
+                                logger.info(f"Reprice: Notional {notional} below quote_min_size {mqs}")
+                                return
+                    except Exception:
+                        pass
+                    slice_left = int(max(1, min(reprice_interval_seconds, int(deadline - time.time()))))
+                    end_time = (datetime.utcnow() + timedelta(seconds=slice_left)).strftime('%Y-%m-%dT%H:%M:%SZ')
+                    try:
+                        new_order = self.client.limit_order_gtd(
+                            client_order_id=str(uuid.uuid4()),
+                            product_id=product_id,
+                            side="BUY",
+                            base_size=str(bs),
+                            limit_price=str(lp),
+                            end_time=end_time,
+                            post_only=post_only
+                        )
+                    except Exception:
+                        new_order = self.client.limit_order_gtc(
+                            client_order_id=str(uuid.uuid4()),
+                            product_id=product_id,
+                            base_size=str(bs),
+                            limit_price=str(lp),
+                            side="BUY",
+                            post_only=post_only
+                        )
+                    try:
+                        new_id = None
+                        if hasattr(new_order, 'success') and new_order.success:
+                            sr = getattr(new_order, 'success_response', None)
+                            if isinstance(sr, dict):
+                                new_id = sr.get('order_id')
+                            else:
+                                new_id = getattr(sr, 'order_id', None)
+                        elif isinstance(new_order, dict):
+                            new_id = new_order.get('order_id')
+                        if new_id:
+                            current_order_id = new_id
+                        logger.info(f"Reprice: Placed refreshed limit {product_id} at {lp} for remaining {remaining_quote}")
+                    except Exception:
+                        pass
+                except Exception as e:
+                    logger.warning(f"Reprice: Failed to reprice {product_id}: {e}")
+
+                sleep_left = deadline - time.time()
+                if sleep_left <= 0:
+                    break
+                time.sleep(min(reprice_interval_seconds, int(sleep_left)))
+
+            try:
+                ord_resp = self.client.get_order(current_order_id)
+                ord_obj = getattr(ord_resp, 'order', None)
+                if ord_obj is None and isinstance(ord_resp, dict):
+                    ord_obj = ord_resp.get('order', ord_resp)
+                if isinstance(ord_obj, dict):
+                    status = ord_obj.get('status')
+                    fv = ord_obj.get('filled_value')
+                    fs = ord_obj.get('filled_size')
+                    ap = ord_obj.get('average_filled_price')
+                else:
+                    status = getattr(ord_obj, 'status', None)
+                    fv = getattr(ord_obj, 'filled_value', None)
+                    fs = getattr(ord_obj, 'filled_size', None)
+                    ap = getattr(ord_obj, 'average_filled_price', None)
+                try:
+                    filled_value = float(fv) if fv is not None else 0.0
+                except Exception:
+                    filled_value = 0.0
+                try:
+                    fs_f = float(fs) if fs is not None else 0.0
+                except Exception:
+                    fs_f = 0.0
+                try:
+                    ap_f = float(ap) if ap is not None else None
+                except Exception:
+                    ap_f = None
+                if filled_value == 0.0 and fs_f and ap_f:
+                    filled_value = fs_f * ap_f
+                remaining_quote = Decimal(str(original_quote_amount)) - Decimal(str(filled_value))
+                if remaining_quote <= Decimal('0'):
+                    logger.info(f"Reprice: Nothing remaining to buy for order {current_order_id}; status={status}")
+                    return
+            except Exception:
+                remaining_quote = Decimal(str(original_quote_amount))
+
+            try:
+                self.client.cancel_orders([current_order_id])
+                logger.info(f"Reprice: Final cancel sent for order {current_order_id}")
+            except Exception as e:
+                logger.warning(f"Reprice: Final cancel failed or not needed for {current_order_id}: {e}")
+
+            try:
+                term = {"CANCELLED", "EXPIRED", "FILLED", "REJECTED", "FAILED"}
+                wait_deadline = time.time() + 10
+                latest_filled_value = float(Decimal(str(original_quote_amount)) - remaining_quote)
+                latest_status = status if 'status' in locals() else None
+                while time.time() < wait_deadline:
+                    try:
+                        ord_resp2 = self.client.get_order(current_order_id)
+                        ord_obj2 = getattr(ord_resp2, 'order', None)
+                        if ord_obj2 is None and isinstance(ord_resp2, dict):
+                            ord_obj2 = ord_resp2.get('order', ord_resp2)
+                        if isinstance(ord_obj2, dict):
+                            latest_status = ord_obj2.get('status')
+                            fv2 = ord_obj2.get('filled_value')
+                            fs2 = ord_obj2.get('filled_size')
+                            ap2 = ord_obj2.get('average_filled_price')
+                        else:
+                            latest_status = getattr(ord_obj2, 'status', None)
+                            fv2 = getattr(ord_obj2, 'filled_value', None)
+                            fs2 = getattr(ord_obj2, 'filled_size', None)
+                            ap2 = getattr(ord_obj2, 'average_filled_price', None)
+                        try:
+                            latest_filled_value = float(fv2) if fv2 is not None else 0.0
+                        except Exception:
+                            latest_filled_value = 0.0
+                        try:
+                            fs2f = float(fs2) if fs2 is not None else 0.0
+                        except Exception:
+                            fs2f = 0.0
+                        try:
+                            ap2f = float(ap2) if ap2 is not None else None
+                        except Exception:
+                            ap2f = None
+                        if latest_filled_value == 0.0 and fs2f and ap2f:
+                            latest_filled_value = fs2f * ap2f
+                        if latest_status in term:
+                            break
+                    except Exception:
+                        pass
+                    time.sleep(0.3)
+                remaining_quote = Decimal(str(original_quote_amount)) - Decimal(str(latest_filled_value))
+                if remaining_quote <= Decimal('0'):
+                    logger.info(f"Reprice: Nothing remaining after final cancel for order {current_order_id}; status={latest_status}")
+                    return
+            except Exception:
+                pass
+
+            try:
+                product = self.client.get_product(product_id)
+                quote_increment = getattr(product, 'quote_increment', None)
+                quote_min_size = getattr(product, 'quote_min_size', None)
+                remaining_quote = quantize_or_round(remaining_quote, quote_increment, 2)
+                if quote_min_size and Decimal(str(remaining_quote)) < Decimal(str(quote_min_size)):
+                    logger.info(f"Reprice: Remaining {remaining_quote} below quote_min_size {quote_min_size} for {product_id}; skipping market buy.")
+                    return
+            except Exception as e:
+                logger.warning(f"Reprice: Failed to prepare remaining quote rounding/min check: {e}")
+
+            try:
+                client_order_id = str(uuid.uuid4())
+                mo = self.client.market_order_buy(
+                    client_order_id=client_order_id,
+                    product_id=product_id,
+                    quote_size=str(remaining_quote)
+                )
+                new_market_order_id = None
+                try:
+                    if hasattr(mo, 'success') and mo.success:
+                        sr = getattr(mo, 'success_response', None)
+                        if isinstance(sr, dict):
+                            new_market_order_id = sr.get('order_id')
+                        else:
+                            new_market_order_id = getattr(sr, 'order_id', None)
+                    elif isinstance(mo, dict):
+                        new_market_order_id = mo.get('order_id')
+                except Exception:
+                    pass
+                logger.info(
+                    f"Reprice: Placed market buy for remaining {remaining_quote} {product_id} "
+                    f"(original_order_id={order_id}, market_order_id={new_market_order_id})"
+                )
+            except Exception as e:
+                logger.error(f"Reprice: Failed to place market buy for remaining amount: {e}")
+        except Exception as e:
+            logger.error(f"Reprice worker error: {e}")
 
 
 if __name__ == '__main__':
