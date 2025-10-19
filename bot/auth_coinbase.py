@@ -812,7 +812,7 @@ class ConnectCoinbase():
                 try:
                     term = self.TERMINAL_STATUSES
                     wait_deadline = time.time() + min(self.REPRICE_WAIT_MAX, max(self.REPRICE_WAIT_MIN, int(config.reprice_interval_seconds)))
-                    latest_filled_value = float(Decimal(str(original_quote_amount)) - remaining_quote)
+                    latest_filled_value = Decimal(str(original_quote_amount)) - remaining_quote
                     latest_status = status
                     while time.time() < wait_deadline:
                         try:
@@ -992,7 +992,7 @@ class ConnectCoinbase():
             try:
                 term = self.TERMINAL_STATUSES
                 wait_deadline = time.time() + self.REPRICE_WAIT_MAX
-                latest_filled_value = float(Decimal(str(original_quote_amount)) - remaining_quote)
+                latest_filled_value = Decimal(str(original_quote_amount)) - remaining_quote
                 latest_status = status
                 while time.time() < wait_deadline:
                     try:
