@@ -6,6 +6,7 @@ import time
 from decimal import Decimal, ROUND_DOWN
 import threading
 import logging
+from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
 
@@ -14,6 +15,13 @@ def parse_bool_env(name, default=False):
     if v is None:
         return default
     return v.strip().lower() in ('1', 'true', 'yes', 'on', 'debug')
+
+def safe_float(value, default=0.0):
+    """Safely convert to float, returning default on failure."""
+    try:
+        return float(value) if value is not None else default
+    except Exception:
+        return default
 
 def quantize_or_round(value, increment, default_decimals):
     """
@@ -35,11 +43,21 @@ def quantize_or_round(value, increment, default_decimals):
     else:
         return Decimal(str(value)).quantize(Decimal('1e-{}'.format(default_decimals)), rounding=ROUND_DOWN)
 
+@dataclass
+class RepriceConfig:
+    limit_price_pct: float
+    post_only: bool
+    reprice_interval_seconds: int
+    reprice_duration_seconds: int
+    timeout_seconds: int
+
 class ConnectCoinbase():
     """
     Class for connecting to Coinbase Advanced Trade API using the official SDK.
     This replaces the previous CCXT implementation.
     """
+
+    TERMINAL_STATUSES = {"CANCELLED", "EXPIRED", "FILLED", "REJECTED", "FAILED"}
 
     def __init__(self):
         """Initialize the Coinbase connection using API keys from environment variables."""
@@ -408,15 +426,18 @@ class ConnectCoinbase():
 
                         # Start fallback-to-market monitor only for limit orders
                         if order_type.lower() != 'market' and order_id:
+                            cfg = RepriceConfig(
+                                limit_price_pct=limit_price_pct,
+                                post_only=post_only,
+                                reprice_interval_seconds=int(reprice_interval_seconds) if reprice_interval_seconds is not None else 0,
+                                reprice_duration_seconds=int(reprice_duration_seconds) if reprice_duration_seconds is not None else int(order_timeout_seconds),
+                                timeout_seconds=int(order_timeout_seconds)
+                            )
                             self._start_reprice_or_fallback_thread(
                                 sr_product_id,
                                 order_id,
                                 amount_quote_currency,
-                                order_timeout_seconds,
-                                limit_price_pct,
-                                post_only,
-                                reprice_interval_seconds,
-                                reprice_duration_seconds
+                                cfg
                             )
 
                         return {
@@ -499,21 +520,20 @@ class ConnectCoinbase():
         t = threading.Thread(target=self._fallback_worker, args=(product_id, order_id, original_quote_amount, timeout_seconds), daemon=True)
         t.start()
 
-    def _start_reprice_or_fallback_thread(self, product_id, order_id, original_quote_amount, timeout_seconds, limit_price_pct, post_only, reprice_interval_seconds, reprice_duration_seconds):
+    def _start_reprice_or_fallback_thread(self, product_id, order_id, original_quote_amount, config: RepriceConfig):
         try:
-            ri = int(reprice_interval_seconds) if reprice_interval_seconds is not None else 0
+            ri = int(config.reprice_interval_seconds) if config.reprice_interval_seconds else 0
         except Exception:
             ri = 0
         if ri > 0:
-            rd = int(reprice_duration_seconds) if reprice_duration_seconds is not None else int(timeout_seconds)
             t = threading.Thread(
                 target=self._reprice_and_fallback_worker,
-                args=(product_id, order_id, original_quote_amount, int(timeout_seconds), limit_price_pct, bool(post_only), ri, rd),
+                args=(product_id, order_id, original_quote_amount, config),
                 daemon=True,
             )
             t.start()
         else:
-            self._start_fallback_thread(product_id, order_id, original_quote_amount, timeout_seconds)
+            self._start_fallback_thread(product_id, order_id, original_quote_amount, config.timeout_seconds)
 
     def _fallback_worker(self, product_id, order_id, original_quote_amount, timeout_seconds):
         try:
@@ -541,18 +561,9 @@ class ConnectCoinbase():
                 fs = getattr(order_obj, 'filled_size', None)
                 ap = getattr(order_obj, 'average_filled_price', None)
 
-            try:
-                filled_value = float(fv) if fv is not None else 0.0
-            except Exception:
-                filled_value = 0.0
-            try:
-                filled_size = float(fs) if fs is not None else 0.0
-            except Exception:
-                filled_size = 0.0
-            try:
-                avg_price = float(ap) if ap is not None else None
-            except Exception:
-                avg_price = None
+            filled_value = safe_float(fv, 0.0)
+            filled_size = safe_float(fs, 0.0)
+            avg_price = safe_float(ap, None)
 
             # If no filled_value but have size and avg price, derive
             if filled_value == 0.0 and filled_size and avg_price:
@@ -572,7 +583,7 @@ class ConnectCoinbase():
 
             # After sending cancel, poll until order reaches a terminal state, then recompute remaining
             try:
-                terminal_statuses = {"CANCELLED", "EXPIRED", "FILLED", "REJECTED", "FAILED"}
+                terminal_statuses = self.TERMINAL_STATUSES
                 deadline = time.time() + 15  # wait up to 15s for terminal state
                 latest_filled_value = filled_value
                 latest_status = status
@@ -592,19 +603,10 @@ class ConnectCoinbase():
                             fv2 = getattr(ord_obj, 'filled_value', None)
                             fs2 = getattr(ord_obj, 'filled_size', None)
                             ap2 = getattr(ord_obj, 'average_filled_price', None)
-                        try:
-                            latest_filled_value = float(fv2) if fv2 is not None else 0.0
-                        except Exception:
-                            latest_filled_value = 0.0
+                        latest_filled_value = safe_float(fv2, 0.0)
                         # Derive from size*avg if needed
-                        try:
-                            fs_f = float(fs2) if fs2 is not None else 0.0
-                        except Exception:
-                            fs_f = 0.0
-                        try:
-                            ap_f = float(ap2) if ap2 is not None else None
-                        except Exception:
-                            ap_f = None
+                        fs_f = safe_float(fs2, 0.0)
+                        ap_f = safe_float(ap2, None)
                         if latest_filled_value == 0.0 and fs_f and ap_f:
                             latest_filled_value = fs_f * ap_f
 
@@ -667,11 +669,12 @@ class ConnectCoinbase():
         except Exception as e:
             logger.error(f"Fallback worker error: {e}")
 
-    def _reprice_and_fallback_worker(self, product_id, order_id, original_quote_amount, timeout_seconds, limit_price_pct, post_only, reprice_interval_seconds, reprice_duration_seconds):
+    def _reprice_and_fallback_worker(self, product_id, order_id, original_quote_amount, config: RepriceConfig):
         try:
             currency_pair = product_id.replace('-', '/')
-            deadline = time.time() + max(1, int(reprice_duration_seconds) if reprice_duration_seconds else int(timeout_seconds))
+            deadline = time.time() + max(1, int(config.reprice_duration_seconds) if config.reprice_duration_seconds else int(config.timeout_seconds))
             current_order_id = order_id
+            status = None
             while time.time() < deadline:
                 try:
                     ord_resp = self.client.get_order(current_order_id)
@@ -688,18 +691,9 @@ class ConnectCoinbase():
                         fv = getattr(ord_obj, 'filled_value', None)
                         fs = getattr(ord_obj, 'filled_size', None)
                         ap = getattr(ord_obj, 'average_filled_price', None)
-                    try:
-                        filled_value = float(fv) if fv is not None else 0.0
-                    except Exception:
-                        filled_value = 0.0
-                    try:
-                        fs_f = float(fs) if fs is not None else 0.0
-                    except Exception:
-                        fs_f = 0.0
-                    try:
-                        ap_f = float(ap) if ap is not None else None
-                    except Exception:
-                        ap_f = None
+                    filled_value = safe_float(fv, 0.0)
+                    fs_f = safe_float(fs, 0.0)
+                    ap_f = safe_float(ap, None)
                     if filled_value == 0.0 and fs_f and ap_f:
                         filled_value = fs_f * ap_f
                     remaining_quote = Decimal(str(original_quote_amount)) - Decimal(str(filled_value))
@@ -717,8 +711,8 @@ class ConnectCoinbase():
                     logger.warning(f"Reprice: Cancel failed or not needed for {current_order_id}: {e}")
 
                 try:
-                    term = {"CANCELLED", "EXPIRED", "FILLED", "REJECTED", "FAILED"}
-                    wait_deadline = time.time() + min(10, max(3, int(reprice_interval_seconds)))
+                    term = self.TERMINAL_STATUSES
+                    wait_deadline = time.time() + min(10, max(3, int(config.reprice_interval_seconds)))
                     latest_filled_value = float(Decimal(str(original_quote_amount)) - remaining_quote)
                     latest_status = status
                     while time.time() < wait_deadline:
@@ -737,18 +731,9 @@ class ConnectCoinbase():
                                 fv2 = getattr(ord_obj2, 'filled_value', None)
                                 fs2 = getattr(ord_obj2, 'filled_size', None)
                                 ap2 = getattr(ord_obj2, 'average_filled_price', None)
-                            try:
-                                latest_filled_value = float(fv2) if fv2 is not None else 0.0
-                            except Exception:
-                                latest_filled_value = 0.0
-                            try:
-                                fs2f = float(fs2) if fs2 is not None else 0.0
-                            except Exception:
-                                fs2f = 0.0
-                            try:
-                                ap2f = float(ap2) if ap2 is not None else None
-                            except Exception:
-                                ap2f = None
+                            latest_filled_value = safe_float(fv2, 0.0)
+                            fs2f = safe_float(fs2, 0.0)
+                            ap2f = safe_float(ap2, None)
                             if latest_filled_value == 0.0 and fs2f and ap2f:
                                 latest_filled_value = fs2f * ap2f
                             if latest_status in term:
@@ -769,7 +754,7 @@ class ConnectCoinbase():
                     break
                 try:
                     mp = Decimal(str(pi['price']))
-                    pct = Decimal(str(limit_price_pct)) / Decimal('100')
+                    pct = Decimal(str(config.limit_price_pct)) / Decimal('100')
                     lp = mp * (Decimal('1') - pct)
                     lp = quantize_or_round(lp, pi['price_increment'], 2)
                     bs = (Decimal(str(remaining_quote)) / Decimal(str(lp)))
@@ -786,7 +771,7 @@ class ConnectCoinbase():
                                 return
                     except Exception:
                         pass
-                    slice_left = int(max(1, min(reprice_interval_seconds, int(deadline - time.time()))))
+                    slice_left = int(max(1, min(int(config.reprice_interval_seconds), int(deadline - time.time()))))
                     end_time = (datetime.utcnow() + timedelta(seconds=slice_left)).strftime('%Y-%m-%dT%H:%M:%SZ')
                     try:
                         new_order = self.client.limit_order_gtd(
@@ -796,7 +781,7 @@ class ConnectCoinbase():
                             base_size=str(bs),
                             limit_price=str(lp),
                             end_time=end_time,
-                            post_only=post_only
+                            post_only=config.post_only
                         )
                     except Exception:
                         new_order = self.client.limit_order_gtc(
@@ -805,7 +790,7 @@ class ConnectCoinbase():
                             base_size=str(bs),
                             limit_price=str(lp),
                             side="BUY",
-                            post_only=post_only
+                            post_only=config.post_only
                         )
                     try:
                         new_id = None
@@ -828,7 +813,7 @@ class ConnectCoinbase():
                 sleep_left = deadline - time.time()
                 if sleep_left <= 0:
                     break
-                time.sleep(min(reprice_interval_seconds, int(sleep_left)))
+                time.sleep(min(int(config.reprice_interval_seconds), int(sleep_left)))
 
             try:
                 ord_resp = self.client.get_order(current_order_id)
@@ -845,18 +830,9 @@ class ConnectCoinbase():
                     fv = getattr(ord_obj, 'filled_value', None)
                     fs = getattr(ord_obj, 'filled_size', None)
                     ap = getattr(ord_obj, 'average_filled_price', None)
-                try:
-                    filled_value = float(fv) if fv is not None else 0.0
-                except Exception:
-                    filled_value = 0.0
-                try:
-                    fs_f = float(fs) if fs is not None else 0.0
-                except Exception:
-                    fs_f = 0.0
-                try:
-                    ap_f = float(ap) if ap is not None else None
-                except Exception:
-                    ap_f = None
+                filled_value = safe_float(fv, 0.0)
+                fs_f = safe_float(fs, 0.0)
+                ap_f = safe_float(ap, None)
                 if filled_value == 0.0 and fs_f and ap_f:
                     filled_value = fs_f * ap_f
                 remaining_quote = Decimal(str(original_quote_amount)) - Decimal(str(filled_value))
@@ -873,10 +849,10 @@ class ConnectCoinbase():
                 logger.warning(f"Reprice: Final cancel failed or not needed for {current_order_id}: {e}")
 
             try:
-                term = {"CANCELLED", "EXPIRED", "FILLED", "REJECTED", "FAILED"}
+                term = self.TERMINAL_STATUSES
                 wait_deadline = time.time() + 10
                 latest_filled_value = float(Decimal(str(original_quote_amount)) - remaining_quote)
-                latest_status = status if 'status' in locals() else None
+                latest_status = status
                 while time.time() < wait_deadline:
                     try:
                         ord_resp2 = self.client.get_order(current_order_id)
@@ -893,18 +869,9 @@ class ConnectCoinbase():
                             fv2 = getattr(ord_obj2, 'filled_value', None)
                             fs2 = getattr(ord_obj2, 'filled_size', None)
                             ap2 = getattr(ord_obj2, 'average_filled_price', None)
-                        try:
-                            latest_filled_value = float(fv2) if fv2 is not None else 0.0
-                        except Exception:
-                            latest_filled_value = 0.0
-                        try:
-                            fs2f = float(fs2) if fs2 is not None else 0.0
-                        except Exception:
-                            fs2f = 0.0
-                        try:
-                            ap2f = float(ap2) if ap2 is not None else None
-                        except Exception:
-                            ap2f = None
+                        latest_filled_value = safe_float(fv2, 0.0)
+                        fs2f = safe_float(fs2, 0.0)
+                        ap2f = safe_float(ap2, None)
                         if latest_filled_value == 0.0 and fs2f and ap2f:
                             latest_filled_value = fs2f * ap2f
                         if latest_status in term:
