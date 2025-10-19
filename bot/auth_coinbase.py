@@ -999,7 +999,7 @@ class ConnectCoinbase():
                             break
                     except Exception:
                         pass
-                    time.sleep(0.3)
+                    time.sleep(self.REPRICE_POLL_SLEEP)
                 remaining_quote = Decimal(str(original_quote_amount)) - Decimal(str(latest_filled_value))
                 if remaining_quote <= Decimal('0'):
                     logger.info(f"Reprice: Nothing remaining after final cancel for order {current_order_id}; status={latest_status}")
