@@ -61,6 +61,7 @@ class ConnectCoinbase():
     DEFAULT_TIMEOUT_SECONDS = 600
     REPRICE_WAIT_MAX = 10
     REPRICE_WAIT_MIN = 3
+    REPRICE_POLL_SLEEP = 0.3
 
     def __init__(self):
         """Initialize the Coinbase connection using API keys from environment variables."""
@@ -702,7 +703,7 @@ class ConnectCoinbase():
                             break
                     except Exception:
                         pass
-                    time.sleep(0.5)
+                    time.sleep(self.REPRICE_POLL_SLEEP)
 
                 # Recompute remaining from latest fill
                 remaining_quote = Decimal(str(original_quote_amount)) - Decimal(str(latest_filled_value))
@@ -771,9 +772,10 @@ class ConnectCoinbase():
             while time.time() < deadline:
                 # Initial wait before first cancel to give the fresh order a chance to rest
                 if first_cycle:
-                    initial_sleep = min(int(config.reprice_interval_seconds or 0), max(0, int(deadline - time.time())))
-                    if initial_sleep > 0:
-                        time.sleep(initial_sleep)
+                    # Ensure at least 1s sleep so a fresh post-only limit can rest
+                    interval = int(config.reprice_interval_seconds or 0)
+                    initial_sleep = min(max(1, interval), max(0, int(deadline - time.time())))
+                    time.sleep(initial_sleep)
                     first_cycle = False
                 try:
                     ord_resp = self.client.get_order(current_order_id)
@@ -839,7 +841,7 @@ class ConnectCoinbase():
                                 break
                         except Exception:
                             pass
-                        time.sleep(0.3)
+                        time.sleep(self.REPRICE_POLL_SLEEP)
                     remaining_quote = Decimal(str(original_quote_amount)) - Decimal(str(latest_filled_value))
                     if remaining_quote <= Decimal('0'):
                         logger.info(f"Reprice: Nothing remaining to buy after cancel for order {current_order_id}; status={latest_status}")
@@ -902,42 +904,20 @@ class ConnectCoinbase():
                         elif isinstance(new_order, dict):
                             new_id = new_order.get('order_id')
 
-                        # If post-only invalid, nudge price down one tick and try once
+                        # If post-only invalid, nudge price down one tick and try once using helpers
                         if not new_id:
-                            try:
-                                err_text = str(getattr(new_order, 'error_response', new_order))
-                            except Exception:
-                                err_text = ''
-                            if 'INVALID_LIMIT_PRICE_POST_ONLY' in err_text or 'POST_ONLY' in err_text:
-                                tick = pi.get('price_increment')
-                                if tick:
-                                    lp2 = (Decimal(str(lp)) - Decimal(str(tick)))
-                                    lp2 = quantize_or_round(lp2, pi['price_increment'], 2)
-                                    try:
-                                        new_order2 = self.client.limit_order_gtd(
-                                            client_order_id=str(uuid.uuid4()),
-                                            product_id=product_id,
-                                            side="BUY",
-                                            base_size=str(bs),
-                                            limit_price=str(lp2),
-                                            end_time=end_time,
-                                            post_only=config.post_only
-                                        )
-                                    except Exception:
-                                        new_order2 = self.client.limit_order_gtc(
-                                            client_order_id=str(uuid.uuid4()),
-                                            product_id=product_id,
-                                            base_size=str(bs),
-                                            limit_price=str(lp2),
-                                            side="BUY",
-                                            post_only=config.post_only
-                                        )
-                                    if hasattr(new_order2, 'success') and new_order2.success:
-                                        sr2 = getattr(new_order2, 'success_response', None)
-                                        if isinstance(sr2, dict):
-                                            new_id = sr2.get('order_id')
-                                        else:
-                                            new_id = getattr(sr2, 'order_id', None)
+                            err_code, err_text = self._extract_error_info(new_order)
+                            if (err_code == 'INVALID_LIMIT_PRICE_POST_ONLY') or (err_code is None and ('INVALID_LIMIT_PRICE_POST_ONLY' in err_text or 'POST_ONLY' in err_text)):
+                                new_order2, lp2 = self._retry_post_only_with_nudge(
+                                    product_id, bs, lp, end_time, config.post_only, pi
+                                )
+                                if new_order2 is not None and hasattr(new_order2, 'success') and new_order2.success:
+                                    sr2 = getattr(new_order2, 'success_response', None)
+                                    if isinstance(sr2, dict):
+                                        new_id = sr2.get('order_id')
+                                    else:
+                                        new_id = getattr(sr2, 'order_id', None)
+                                    lp = lp2
                         if new_id:
                             current_order_id = new_id
                             logger.info(f"Reprice: Placed refreshed limit {product_id} at {lp} for remaining {remaining_quote}")
@@ -951,7 +931,7 @@ class ConnectCoinbase():
                     sleep_left = deadline - time.time()
                     if sleep_left <= 0:
                         break
-                    time.sleep(min(int(config.reprice_interval_seconds), int(sleep_left)))
+                    time.sleep(max(1, min(int(config.reprice_interval_seconds), int(sleep_left))))
 
                 except Exception as e:
                     logger.warning(f"Reprice: Failed to reprice {product_id}: {e}")
