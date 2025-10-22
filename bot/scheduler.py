@@ -20,7 +20,8 @@ class scheduleSetup():
             'hourly': self._set_hourly,
             'daily': self._set_daily,
             'weekly': self._set_weekly,
-            'monthly': self._set_monthly
+            'monthly': self._set_monthly,
+            'once': self._set_once
         }
 
         self.frequency_list.append(task['frequency'])
@@ -90,6 +91,35 @@ class scheduleSetup():
         logger.info('Schedule set: {} on day {} at {} | {} for {} quote currency'.format(
             task['frequency'],
             task['day_of_month'], 
+            task['time'],
+            task['currency_pair'],
+            task['quote_currency_amount']
+        ))
+
+    def _set_once(self, task, exchange_function):
+        job_holder = {}
+
+        def run_once():
+            try:
+                exchange_function()
+            finally:
+                try:
+                    j = job_holder.get('job')
+                    if j:
+                        schedule.cancel_job(j)
+                except Exception:
+                    pass
+                logger.info('Once schedule executed and cancelled: {} at {} | {} for {} quote currency'.format(
+                    task['frequency'],
+                    task['time'],
+                    task['currency_pair'],
+                    task['quote_currency_amount']
+                ))
+
+        job = schedule.every().day.at(task['time']).do(run_once)
+        job_holder['job'] = job
+        logger.info('Schedule set: {} at {} | {} for {} quote currency'.format(
+            task['frequency'], 
             task['time'],
             task['currency_pair'],
             task['quote_currency_amount']
