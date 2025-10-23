@@ -361,7 +361,7 @@ class ConnectCoinbase():
                 
                 # Debug logging is configured at process startup if verbose=True
                 
-                tif = str(time_in_force).upper() if time_in_force is not None else None
+                tif = time_in_force.upper() if time_in_force else None
                 if tif == 'GTC':
                     order = self.client.limit_order_gtc(
                         client_order_id=client_order_id,
