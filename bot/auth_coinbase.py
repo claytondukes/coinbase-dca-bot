@@ -363,10 +363,7 @@ class ConnectCoinbase():
                 
                 # Debug logging is configured at process startup if verbose=True
                 
-                try:
-                    tif = str(time_in_force).upper() if time_in_force else None
-                except Exception:
-                    tif = None
+                tif = str(time_in_force).upper() if time_in_force else None
                 if tif == 'GTC':
                     order = self.client.limit_order_gtc(
                         client_order_id=client_order_id,
@@ -389,6 +386,7 @@ class ConnectCoinbase():
                         )
                     except Exception as e:
                         logger.warning(f"GTD order failed: {e}")
+                        logger.warning("Falling back to GTC order without expiration")
                         order = self.client.limit_order_gtc(
                             client_order_id=client_order_id,
                             product_id=product_id,

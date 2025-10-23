@@ -141,9 +141,9 @@ class scheduleSetup():
                     task['quote_currency_amount']
                 ))
                 run_once()
-        except Exception:
+        except Exception as e:
             # Non-fatal; if this check fails, the job will still run at the next scheduled time
-            pass
+            logger.error(f"Immediate-execution time check failed: {e}", exc_info=True)
 
     def _other_schedule(self, task, exchange_function):
         logger.error('no valid "frequency" key:value in schedule configuration found')
