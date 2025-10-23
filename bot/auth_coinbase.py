@@ -272,9 +272,13 @@ class ConnectCoinbase():
                 if limit_price_absolute is not None:
                     limit_price = Decimal(str(limit_price_absolute))
                     try:
-                        # Warn if absolute limit is >5% above market for BUY orders
-                        mp5 = (Decimal(str(market_price)) * Decimal('1.05'))
-                        if limit_price > mp5:
+                        # Validate absolute limit price for post-only and warn if too high
+                        if post_only and limit_price >= Decimal(str(market_price)):
+                            logger.warning(
+                                f"Limit price {limit_price} is at or above market price {market_price} with post_only=True. "
+                                f"This order will be rejected. For a maker buy order, limit price must be below market."
+                            )
+                        elif limit_price > (Decimal(str(market_price)) * Decimal('1.05')):
                             logger.warning(
                                 f"Limit price {limit_price} is more than 5% above market price {market_price}. "
                                 f"This may result in unnecessary overpayment for the buy order."
@@ -289,7 +293,7 @@ class ConnectCoinbase():
                 
                 logger.info(f"Market price: {market_price}, Limit price: {limit_price}")
                 if limit_price_absolute is not None:
-                    logger.info("Using absolute limit price mode")
+                    logger.info(f"Using absolute limit price mode with limit price {limit_price}")
                 else:
                     logger.info(f"Using {limit_price_pct}% discount for limit order")
                 
