@@ -133,7 +133,7 @@ class scheduleSetup():
             except ValueError:
                 logger.error(f"Invalid time format for once schedule: {task['time']}. Expected HH:MM.")
                 return
-            if now.time() > scheduled_time:
+            if now.time() >= scheduled_time:
                 logger.info('Once schedule time has already passed today, executing immediately: {} at {} | {} for {} quote currency'.format(
                     task['frequency'],
                     task['time'],
