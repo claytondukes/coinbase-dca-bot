@@ -269,8 +269,20 @@ class ConnectCoinbase():
                 
                 # Determine limit price: absolute if provided, else percentage below market
                 market_price = product_info['price']
+                using_absolute = False
                 if limit_price_absolute is not None:
+                    using_absolute = True
                     limit_price = Decimal(str(limit_price_absolute))
+                    try:
+                        # Warn if absolute limit is >5% above market for BUY orders
+                        mp5 = (Decimal(str(market_price)) * Decimal('1.05'))
+                        if limit_price > mp5:
+                            logger.warning(
+                                f"Limit price {limit_price} is more than 5% above market price {market_price}. "
+                                f"This may result in unnecessary overpayment for the buy order."
+                            )
+                    except Exception:
+                        pass
                 else:
                     limit_price = market_price * (1 - (limit_price_pct / 100))
                 
@@ -278,7 +290,10 @@ class ConnectCoinbase():
                 limit_price = quantize_or_round(limit_price, product_info['price_increment'], 2)
                 
                 logger.info(f"Market price: {market_price}, Limit price: {limit_price}")
-                logger.info(f"Using {limit_price_pct}% discount for limit order")
+                if using_absolute:
+                    logger.info("Using absolute limit price mode")
+                else:
+                    logger.info(f"Using {limit_price_pct}% discount for limit order")
                 
                 # Calculate base currency amount (how much crypto we're buying)
                 base_size = (Decimal(str(amount_quote_currency)) / Decimal(str(limit_price)))
@@ -1024,6 +1039,18 @@ class ConnectCoinbase():
                     logger.info(f"Reprice: Nothing remaining after final cancel for order {current_order_id}; status={latest_status}")
                     return
             except Exception:
+                pass
+
+            # Respect disable_fallback: do not place a market buy for remaining amount
+            try:
+                if getattr(config, 'disable_fallback', False):
+                    logger.info(
+                        f"Reprice: Fallback disabled; leaving remaining notional unfilled for {product_id}. "
+                        f"Remaining quote: {remaining_quote}"
+                    )
+                    return
+            except Exception:
+                # If config is malformed, proceed with safe default behavior
                 pass
 
             try:

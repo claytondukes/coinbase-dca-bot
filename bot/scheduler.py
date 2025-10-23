@@ -107,8 +107,8 @@ class scheduleSetup():
                     j = job_holder.get('job')
                     if j:
                         schedule.cancel_job(j)
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.error(f"Failed to cancel job: {e}", exc_info=True)
                 logger.info('Once schedule executed and cancelled: {} at {} | {} for {} quote currency'.format(
                     task['frequency'],
                     task['time'],
@@ -124,6 +124,26 @@ class scheduleSetup():
             task['currency_pair'],
             task['quote_currency_amount']
         ))
+
+        # If the specified time has already passed today, run immediately and cancel the scheduled job
+        try:
+            now = datetime.now()
+            try:
+                scheduled_time = datetime.strptime(task['time'], '%H:%M').time()
+            except ValueError:
+                logger.error(f"Invalid time format for once schedule: {task['time']}. Expected HH:MM.")
+                return
+            if now.time() >= scheduled_time:
+                logger.info('Once schedule time has already passed today, executing immediately: {} at {} | {} for {} quote currency'.format(
+                    task['frequency'],
+                    task['time'],
+                    task['currency_pair'],
+                    task['quote_currency_amount']
+                ))
+                run_once()
+        except Exception:
+            # Non-fatal; if this check fails, the job will still run at the next scheduled time
+            pass
 
     def _other_schedule(self, task, exchange_function):
         logger.error('no valid "frequency" key:value in schedule configuration found')
