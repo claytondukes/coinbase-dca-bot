@@ -279,8 +279,8 @@ class ConnectCoinbase():
                                 f"Limit price {limit_price} is more than 5% above market price {market_price}. "
                                 f"This may result in unnecessary overpayment for the buy order."
                             )
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.warning(f"Failed to validate absolute limit price against market: {e}")
                 else:
                     limit_price = market_price * (1 - (limit_price_pct / 100))
                 
