@@ -9,7 +9,8 @@ price.
 
 ## Features
 
-- Schedule cryptocurrency purchases on a seconds, hourly, daily, weekly, or monthly basis
+- Schedule cryptocurrency purchases on a seconds, hourly, daily, weekly,
+  monthly, or once basis
 - Configure purchases for multiple currency pairs
 - Specify the exact time and day for transactions
 - Supports post-only limit (maker) and market (taker) orders; optional
@@ -155,6 +156,19 @@ docker compose logs -f --tail=100
 - If `order_type` is not specified, limit orders are used by default. To use
   market orders, set `order_type` to "market".
 
+- Alternatively, set `limit_price_absolute` to place a fixed-price limit order.
+  When provided, `limit_price_pct` is ignored. The bot logs a warning if the
+  absolute price is more than 5% above market for a buy.
+- Set `time_in_force` to `"GTC"` to create a Good‑Til‑Cancelled order that
+  does not auto‑expire. Any value other than `"GTC"` will be treated as `"GTD"`.
+  Unsupported values (such as `"IOC"`, `"FOK"`, etc.) will not result in an
+  error, but will fallback to `"GTD"` behavior.
+- Set `disable_fallback: true` to skip the fallback‑to‑market step after timeout
+  or the end of a repricing window.
+- Use `"once"` frequency for one‑off jobs. It runs at the configured `time` and
+  cancels itself after execution. If the time has already passed today at
+  startup, it executes immediately.
+
 ## Environment (.env)
 
 A `.env` file in the project root is loaded by Docker Compose via `env_file:
@@ -227,6 +241,30 @@ Example schedule entry with repricing:
   "order_timeout_seconds": 1800,
   "reprice_interval_seconds": 60,
   "reprice_duration_seconds": 1800
+}
+```
+
+## Absolute price, GTC, and one‑off orders
+
+- To target an exact price, provide `limit_price_absolute`. Combine with
+  `time_in_force: "GTC"` to leave the order open until filled, and optionally
+  `disable_fallback: true` to prevent a market buy after expiry or repricing.
+- Use `"once"` frequency to place a single order at the scheduled time. If the
+  time has already passed when the bot starts, the order is placed immediately.
+
+Example one‑off absolute GTC order:
+
+```json
+{
+  "frequency": "once",
+  "time": "17:45",
+  "currency_pair": "BTC/USDC",
+  "quote_currency_amount": 2000,
+  "order_type": "limit",
+  "limit_price_absolute": 101830,
+  "post_only": true,
+  "time_in_force": "GTC",
+  "disable_fallback": true
 }
 ```
 

@@ -50,6 +50,7 @@ class RepriceConfig:
     reprice_interval_seconds: int
     reprice_duration_seconds: int
     timeout_seconds: int
+    disable_fallback: bool = False
 
 class ConnectCoinbase():
     """
@@ -170,7 +171,7 @@ class ConnectCoinbase():
             logger.error(f"Failed to get product information: {e}")
             return None
 
-    def create_order(self, currency_pair, amount_quote_currency, client_order_id=None, order_type="limit", limit_price_pct=0.01, order_timeout_seconds=600, post_only=True, max_retries=3, reprice_interval_seconds=None, reprice_duration_seconds=None):
+    def create_order(self, currency_pair, amount_quote_currency, client_order_id=None, order_type="limit", limit_price_pct=0.01, order_timeout_seconds=600, post_only=True, max_retries=3, reprice_interval_seconds=None, reprice_duration_seconds=None, limit_price_absolute=None, time_in_force=None, disable_fallback=False):
         """
         Create a buy order for cryptocurrency using quote currency amount.
         
@@ -266,18 +267,35 @@ class ConnectCoinbase():
                         'error': 'Missing product info'
                     }
                 
-                # Calculate limit price with discount from market price
+                # Determine limit price: absolute if provided, else percentage below market
                 market_price = product_info['price']
-                
-                # Apply discount percentage to calculate limit price
-                # Default is 0.01% below market price to ensure maker status
-                limit_price = market_price * (1 - (limit_price_pct / 100))
+                if limit_price_absolute is not None:
+                    limit_price = Decimal(str(limit_price_absolute))
+                    try:
+                        # Validate absolute limit price for post-only and warn if too high
+                        if post_only and limit_price >= Decimal(str(market_price)):
+                            logger.warning(
+                                f"Limit price {limit_price} is at or above market price {market_price} with post_only=True. "
+                                f"This order will be rejected. For a maker buy order, limit price must be below market."
+                            )
+                        elif limit_price > (Decimal(str(market_price)) * Decimal('1.05')):
+                            logger.warning(
+                                f"Limit price {limit_price} is more than 5% above market price {market_price}. "
+                                f"This may result in unnecessary overpayment for the buy order."
+                            )
+                    except Exception as e:
+                        logger.warning(f"Failed to validate absolute limit price against market: {e}")
+                else:
+                    limit_price = market_price * (1 - (limit_price_pct / 100))
                 
                 # Quantize limit_price using helper
                 limit_price = quantize_or_round(limit_price, product_info['price_increment'], 2)
                 
                 logger.info(f"Market price: {market_price}, Limit price: {limit_price}")
-                logger.info(f"Using {limit_price_pct}% discount for limit order")
+                if limit_price_absolute is not None:
+                    logger.info(f"Using absolute limit price mode with limit price {limit_price}")
+                else:
+                    logger.info(f"Using {limit_price_pct}% discount for limit order")
                 
                 # Calculate base currency amount (how much crypto we're buying)
                 base_size = (Decimal(str(amount_quote_currency)) / Decimal(str(limit_price)))
@@ -347,30 +365,38 @@ class ConnectCoinbase():
                 
                 # Debug logging is configured at process startup if verbose=True
                 
-                try:
-                    # Try placing a GTD limit order with expiration time
-                    order = self.client.limit_order_gtd(
-                        client_order_id=client_order_id,
-                        product_id=product_id,
-                        side="BUY",
-                        base_size=str(base_size),
-                        limit_price=str(limit_price),
-                        end_time=end_time,
-                        post_only=post_only
-                    )
-                except Exception as e:
-                    logger.warning(f"GTD order failed: {e}")
-                    logger.info("Falling back to GTC order without expiration")
-                    
-                    # Fall back to GTC limit order without expiration
+                tif = time_in_force.upper() if time_in_force else None
+                if tif == 'GTC':
                     order = self.client.limit_order_gtc(
                         client_order_id=client_order_id,
                         product_id=product_id,
                         base_size=str(base_size),
                         limit_price=str(limit_price),
-                        side="BUY",  # Required parameter for limit_order_gtc
+                        side="BUY",
                         post_only=post_only
                     )
+                else:
+                    try:
+                        order = self.client.limit_order_gtd(
+                            client_order_id=client_order_id,
+                            product_id=product_id,
+                            side="BUY",
+                            base_size=str(base_size),
+                            limit_price=str(limit_price),
+                            end_time=end_time,
+                            post_only=post_only
+                        )
+                    except Exception as e:
+                        logger.warning(f"GTD order failed: {e}")
+                        logger.warning("Falling back to GTC order without expiration")
+                        order = self.client.limit_order_gtc(
+                            client_order_id=client_order_id,
+                            product_id=product_id,
+                            base_size=str(base_size),
+                            limit_price=str(limit_price),
+                            side="BUY",
+                            post_only=post_only
+                        )
                 
                 # For limit orders, we can optionally monitor the status
                 # This is commented out by default as it might block the scheduler
@@ -436,6 +462,7 @@ class ConnectCoinbase():
                                 reprice_interval_seconds,
                                 reprice_duration_seconds,
                                 order_timeout_seconds,
+                                disable_fallback,
                             )
                             self._start_reprice_or_fallback_thread(
                                 sr_product_id, order_id, amount_quote_currency, cfg
@@ -471,7 +498,8 @@ class ConnectCoinbase():
                                     else int(order_timeout_seconds) if order_timeout_seconds is not None
                                     else 600
                                 ),
-                                timeout_seconds=int(order_timeout_seconds) if order_timeout_seconds is not None else 600
+                                timeout_seconds=int(order_timeout_seconds) if order_timeout_seconds is not None else 600,
+                                disable_fallback=bool(disable_fallback)
                             )
                             self._start_reprice_or_fallback_thread(
                                 sr_product_id,
@@ -552,9 +580,10 @@ class ConnectCoinbase():
             )
             t.start()
         else:
-            self._start_fallback_thread(product_id, order_id, original_quote_amount, config.timeout_seconds)
+            if not getattr(config, 'disable_fallback', False):
+                self._start_fallback_thread(product_id, order_id, original_quote_amount, config.timeout_seconds)
 
-    def _build_reprice_config(self, limit_price_pct, post_only, reprice_interval_seconds, reprice_duration_seconds, order_timeout_seconds) -> RepriceConfig:
+    def _build_reprice_config(self, limit_price_pct, post_only, reprice_interval_seconds, reprice_duration_seconds, order_timeout_seconds, disable_fallback) -> RepriceConfig:
         try:
             ri = int(reprice_interval_seconds) if reprice_interval_seconds is not None else 0
         except Exception:
@@ -573,6 +602,7 @@ class ConnectCoinbase():
             reprice_interval_seconds=ri,
             reprice_duration_seconds=rd,
             timeout_seconds=base_timeout,
+            disable_fallback=bool(disable_fallback),
         )
 
     def _extract_error_info(self, resp):
@@ -1009,6 +1039,18 @@ class ConnectCoinbase():
                     logger.info(f"Reprice: Nothing remaining after final cancel for order {current_order_id}; status={latest_status}")
                     return
             except Exception:
+                pass
+
+            # Respect disable_fallback: do not place a market buy for remaining amount
+            try:
+                if getattr(config, 'disable_fallback', False):
+                    logger.info(
+                        f"Reprice: Fallback disabled; leaving remaining notional unfilled for {product_id}. "
+                        f"Remaining quote: {remaining_quote}"
+                    )
+                    return
+            except Exception:
+                # If config is malformed, proceed with safe default behavior
                 pass
 
             try:

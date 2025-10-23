@@ -20,7 +20,8 @@ class scheduleSetup():
             'hourly': self._set_hourly,
             'daily': self._set_daily,
             'weekly': self._set_weekly,
-            'monthly': self._set_monthly
+            'monthly': self._set_monthly,
+            'once': self._set_once
         }
 
         self.frequency_list.append(task['frequency'])
@@ -94,6 +95,55 @@ class scheduleSetup():
             task['currency_pair'],
             task['quote_currency_amount']
         ))
+
+    def _set_once(self, task, exchange_function):
+        job_holder = {}
+
+        def run_once():
+            try:
+                exchange_function()
+            finally:
+                try:
+                    j = job_holder.get('job')
+                    if j:
+                        schedule.cancel_job(j)
+                except Exception as e:
+                    logger.error(f"Failed to cancel job: {e}", exc_info=True)
+                logger.info('Once schedule executed and cancelled: {} at {} | {} for {} quote currency'.format(
+                    task['frequency'],
+                    task['time'],
+                    task['currency_pair'],
+                    task['quote_currency_amount']
+                ))
+
+        job = schedule.every().day.at(task['time']).do(run_once).tag('once')
+        job_holder['job'] = job
+        logger.info('Schedule set: {} at {} | {} for {} quote currency'.format(
+            task['frequency'], 
+            task['time'],
+            task['currency_pair'],
+            task['quote_currency_amount']
+        ))
+
+        # If the specified time has already passed today, run immediately and cancel the scheduled job
+        try:
+            now = datetime.now()
+            try:
+                scheduled_time = datetime.strptime(task['time'], '%H:%M').time()
+            except ValueError:
+                logger.error(f"Invalid time format for once schedule: {task['time']}. Expected HH:MM.")
+                return
+            if now.time() >= scheduled_time:
+                logger.info('Once schedule time has already passed today, executing immediately: {} at {} | {} for {} quote currency'.format(
+                    task['frequency'],
+                    task['time'],
+                    task['currency_pair'],
+                    task['quote_currency_amount']
+                ))
+                run_once()
+        except Exception as e:
+            # Non-fatal; if this check fails, the job will still run at the next scheduled time
+            logger.error(f"Immediate-execution time check failed: {e}", exc_info=True)
 
     def _other_schedule(self, task, exchange_function):
         logger.error('no valid "frequency" key:value in schedule configuration found')
