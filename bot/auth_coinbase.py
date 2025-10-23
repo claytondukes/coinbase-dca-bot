@@ -269,9 +269,7 @@ class ConnectCoinbase():
                 
                 # Determine limit price: absolute if provided, else percentage below market
                 market_price = product_info['price']
-                using_absolute = False
                 if limit_price_absolute is not None:
-                    using_absolute = True
                     limit_price = Decimal(str(limit_price_absolute))
                     try:
                         # Warn if absolute limit is >5% above market for BUY orders
@@ -290,7 +288,7 @@ class ConnectCoinbase():
                 limit_price = quantize_or_round(limit_price, product_info['price_increment'], 2)
                 
                 logger.info(f"Market price: {market_price}, Limit price: {limit_price}")
-                if using_absolute:
+                if limit_price_absolute is not None:
                     logger.info("Using absolute limit price mode")
                 else:
                     logger.info(f"Using {limit_price_pct}% discount for limit order")
@@ -363,7 +361,7 @@ class ConnectCoinbase():
                 
                 # Debug logging is configured at process startup if verbose=True
                 
-                tif = str(time_in_force).upper() if time_in_force else None
+                tif = str(time_in_force).upper() if time_in_force is not None else None
                 if tif == 'GTC':
                     order = self.client.limit_order_gtc(
                         client_order_id=client_order_id,

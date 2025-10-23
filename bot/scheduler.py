@@ -116,7 +116,7 @@ class scheduleSetup():
                     task['quote_currency_amount']
                 ))
 
-        job = schedule.every().day.at(task['time']).do(run_once)
+        job = schedule.every().day.at(task['time']).do(run_once).tag('once')
         job_holder['job'] = job
         logger.info('Schedule set: {} at {} | {} for {} quote currency'.format(
             task['frequency'], 

@@ -160,7 +160,11 @@ docker compose logs -f --tail=100
   When provided, `limit_price_pct` is ignored. The bot logs a warning if the
   absolute price is more than 5% above market for a buy.
 - Set `time_in_force` to `"GTC"` to create a Good‑Til‑Cancelled order that
-  does not auto‑expire. Otherwise, the bot uses GTD with `order_timeout_seconds`.
+  does not auto‑expire. Set `time_in_force` to `"GTD"` to create a Good‑Til‑Date
+  order, which will auto‑cancel after `order_timeout_seconds`. Other values for
+  `time_in_force` (such as `"IOC"`, `"FOK"`, etc.) are not supported and will
+  result in an error or fallback to the default `"GTD"` or `"GTC"` behavior.
+  Please ensure you use only `"GTC"` or `"GTD"` for predictable results.
 - Set `disable_fallback: true` to skip the fallback‑to‑market step after timeout
   or the end of a repricing window.
 - Use `"once"` frequency for one‑off jobs. It runs at the configured `time` and
