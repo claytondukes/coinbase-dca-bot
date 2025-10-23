@@ -109,7 +109,7 @@ class scheduleSetup():
                         schedule.cancel_job(j)
                 except Exception as e:
                     logger.error(f"Failed to cancel job: {e}", exc_info=True)
-                logger.info('Once schedule executed and cancelled: {} at {} | {} for {} quote currency'.format(
+                logger.info('Once schedule job completed and removed: {} at {} | {} for {} quote currency'.format(
                     task['frequency'],
                     task['time'],
                     task['currency_pair'],
